@@ -153,7 +153,7 @@ static void distribute_hot(struct key *keys, size_t n, double hotset_percent, do
 
     size_t i;
     double sum = 0;
-
+/*
     // Hot key cdf
     for (i = 0; i < hotset_size; i++) {
         sum += 1.0 / hotset_size * hot_access_chance;
@@ -162,6 +162,17 @@ static void distribute_hot(struct key *keys, size_t n, double hotset_percent, do
     // Cold key cdf
     for (; i < n; i++) {
         sum += 1.0 / coldset_size * cold_access_chance;
+        keys[i].cdf = sum;
+    }
+ */
+    // Cold key cdf
+    for (i = 0; i < coldset_size; i++) {
+        sum += 1.0 / coldset_size * cold_access_chance;
+        keys[i].cdf = sum;
+    }
+    // Hot key cdf
+    for (; i < n; i++) {
+        sum += 1.0 / hotset_size * hot_access_chance;
         keys[i].cdf = sum;
     }
 }

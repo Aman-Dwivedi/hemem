@@ -36,11 +36,6 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
     flags |= MAP_SHARED;
   }
 
-  if ((flags & MAP_ANONYMOUS) != MAP_ANONYMOUS) {
-    flags |= MAP_ANONYMOUS;
-    fd = -1;
-  }
-
   if ((flags & MAP_HUGETLB) != MAP_HUGETLB) {
     flags |= MAP_HUGETLB;
   }

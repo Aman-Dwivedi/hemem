@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -41,9 +42,6 @@ pthread_mutex_t channel_lock;
 
 int request_fd;
 int remap_fd;
-
-void *dram_devdax_mmap;
-void *nvm_devdax_mmap;
 
 double target_miss_ratio =  0.1;
 
@@ -362,20 +360,6 @@ void hemem_app_init()
   uffdio_api.ioctls = 0;
   if (ioctl(uffd, UFFDIO_API, &uffdio_api) == -1) {
     perror("ioctl uffdio_api");
-    assert(0);
-  }
-
-#if DRAMSIZE != 0
-  dram_devdax_mmap =libc_mmap(NULL, DRAMSIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, dramfd, 0);
-  if (dram_devdax_mmap == MAP_FAILED) {
-    perror("dram devdax mmap");
-    assert(0);
-  }
-#endif
-
-  nvm_devdax_mmap =libc_mmap(NULL, NVMSIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, nvmfd, 0);
-  if (nvm_devdax_mmap == MAP_FAILED) {
-    perror("nvm devdax mmap");
     assert(0);
   }
 

@@ -59,12 +59,12 @@ for file_pref in BG_PREFIXES:
     outfile = open(file_pref + "_summary.out", "w", encoding='utf8')
     outfile.write(file_pref + "\n")
     # Output throughputs
-    outfile.write("Throughput\t")
+    outfile.write("Throughput;")
     for app in BG_APPS:
-        outfile.write(app + "\t")
-    outfile.write("\n\t")
+        outfile.write(app + ";")
+    outfile.write("\n;")
     for app in BG_APPS:
-        outfile.write(throughput[app] + "\t")
+        outfile.write(throughput[app] + ";")
     outfile.write("\n")
 
     # Calculate cdf for the different apps
@@ -80,22 +80,22 @@ for file_pref in BG_PREFIXES:
 
     # Output key latency points
     for lats in KEY_LATS:
-        outfile.write(str(np.round(lats * 100, 2)) + "% latencies\t")
+        outfile.write(str(np.round(lats * 100, 2)) + "% latencies;")
         for app in BG_APPS:
-            outfile.write(app + "\t")
-        outfile.write("\n\t")
+            outfile.write(app + ";")
+        outfile.write("\n;")
         for app in BG_APPS:
-            outfile.write(str(np.searchsorted(cdf[app], lats)) + "\t")
+            outfile.write(str(np.searchsorted(cdf[app], lats)) + ";")
         outfile.write("\n")
 
     # Output histogram
-    outfile.write("Latency percentiles\t")
+    outfile.write("Latency percentiles;")
     for app in BG_APPS:
-        outfile.write(app + "\t")
+        outfile.write(app + ";")
     outfile.write("\n")
     for i in range(MAX_LATENCY):
-        outfile.write(str(i) + "\t")
+        outfile.write(str(i) + ";")
         for app in BG_APPS:
-            outfile.write(str(cdf[app][i]) + "\t")
+            outfile.write(str(cdf[app][i]) + ";")
         outfile.write("\n")
     outfile.close()

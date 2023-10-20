@@ -421,6 +421,7 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
   process->need_cool_dram = false;
   process->need_cool_nvm = false;
   process->migrations_up = process->migrations_down = 0;
+  process->migration_waits = 0;
 
   process->max_dram = request->req_dram;
 
@@ -519,7 +520,7 @@ int ucm_alloc_space(struct alloc_request* request, struct alloc_response* respon
 //  #ifndef USE_DMA
 //    hemem_parallel_memset(ucm_addr, 0, pagesize);
 //  #else
-      memset(ucm_addr, 0, pagesize);
+//      memset(ucm_addr, 0, pagesize);
 //  #endif
     memsets++;
 
@@ -957,6 +958,7 @@ void handle_wp_fault(struct hemem_process *process, uint64_t page_boundry) {
   assert(page != NULL);
 
   migration_waits++;
+  process->migration_waits++;
 
   //LOG("hemem: handle_wp_fault: waiting for migration for page %lx\n",
   //    page_boundry);
@@ -1059,7 +1061,7 @@ void handle_missing_fault(struct hemem_process *process,
   addr = (in_dram ? dram_devdax_mmap + offset : nvm_devdax_mmap + offset);
 
 //#ifdef USE_DMA
-    memset(addr, 0, pagesize);
+//    memset(addr, 0, pagesize);
 //#else
 //  hemem_parallel_memset(addr, 0, pagesize);
 //#endif
