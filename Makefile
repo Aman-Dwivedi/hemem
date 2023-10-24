@@ -90,7 +90,7 @@ NUMA_CMD_CLIENT ?= numactl -N${OTHER_NODE} -m${OTHER_NODE}
 PRELOAD  ?= 
 
 SET_LOW_PRTY = MISS_RATIO=1.0
-SET_HIGH_PRTY = MISS_RATIO=0.1
+SET_HIGH_PRTY = MISS_RATIO=1.0
 
 CMD_KILL_ALL := \
 	list_descendants () { \
@@ -181,6 +181,7 @@ run_flexkvs: ./apps/flexkvs/flexkvs ./apps/flexkvs/kvsbench
 	fi; \
 	perf stat -e instructions,LLC-store-misses,LLC-load-misses -I 1000 -p $${FLEXKVS_SERVER} -o ${RES}/${PREFIX}_flexkv_cache.txt & \
 	./wait-kvs.sh ${RES}/${PREFIX}_server.txt; \
+	./wait-kvsbench.sh ${RES}/${PREFIX}_flexkv.txt & \
 	${FLEXKV_NICE} ${NUMA_CMD_CLIENT} \
 		./apps/flexkvs/kvsbench -t ${FLEXKV_THDS} -T ${FLEXKV_RUNTIME} -w ${FLEXKV_WARMUP} \
 		-h ${FLEXKV_HOT_FRAC} 127.0.0.1:11211 -S $$((15*${FLEXKV_SIZE}/16)) > ${RES}/${PREFIX}_flexkv.txt; \

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+sleep 5
+
+while [[ $( grep "Start" $1 ) -eq "" ]]
+do
+        sleep 1
+        #echo "Waiting for graph setup"
+done
+
+echo "kvsbench Ready"
+echo `pidof flexkvs`:0.1 > /tmp/miss_ratio_update
+kill -s USR2 `pidof central-manager`
