@@ -62,7 +62,7 @@ extern struct settings settings;
 
 /** Initialize global settings from command-line. */
 int settings_init(int argc, char *argv[]);
-
+int client_main(int argc, char *argv[]);
 
 /******************************************************************************/
 /* Hash table operations */

@@ -68,7 +68,7 @@ void init_settings(struct settings *s)
     s->keynum = 1000;
     s->keydist = DIST_UNIFORM;
     s->valuesize = 16 * 1024;
-    s->get_prob = 0.9;
+    s->get_prob = 0.5;
     s->warmup_time = 120;
     s->cooldown_time = 5;
     s->run_time = 600;
