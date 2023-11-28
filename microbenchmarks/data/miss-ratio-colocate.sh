@@ -12,7 +12,7 @@ file6="data/colocate/logs/sixth-log.txt"
 set datafile separator "\t"
 set ytics 0.2
 set key outside top left horizontal font ",7"
-set xrange [0:300]
+set xrange [0:400]
 set yrange [0:1]
 
 set xlabel "Time (s)"
