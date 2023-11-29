@@ -9,7 +9,7 @@ CFLAGS = -std=gnu99 -g -Wall -Icommon/include -O3 -march=native
 LDFLAGS = -pthread -g -O3
 LDLIBS = -lrt -lm -lpthread -lrt -ldl
 
-all: flexkvs kvsbench
+all: flexkvs #kvsbench
 all-sockets: flexkvs kvsbench
 all-ll: flexkvs-ll
 
