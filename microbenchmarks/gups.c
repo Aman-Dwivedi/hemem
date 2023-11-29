@@ -39,14 +39,22 @@
 #include "../src/ucm/timer.h"
 //#include "../src/hemem.h"
 
-
 #include "gups.h"
 
-#define MAX_THREADS     64
+#define MAX_THREADS     24
 
 #define GUPS_PAGE_SIZE      (4 * 1024)
 #define PAGE_NUM            3
 #define PAGES               2048
+
+
+#define SEC_TO_NS (1000 * 1000 * 1000)
+#define HIST_START_NS 0
+#define HIST_BUCKET_NS 1 
+#define HIST_BUCKETS 4096
+#define BUFSIZE 1000000
+
+uint32_t *thread_hist[MAX_THREADS];
 
 #ifdef HOTSPOT
 extern uint64_t hotset_start;
@@ -56,7 +64,7 @@ extern double hotset_fraction;
 #define IGNORE_STRAGGLERS
 
 int threads;
-int start_cpu = 8;
+int start_cpu = 10;
 
 uint64_t hot_start = 0;
 volatile uint64_t hotsize = 0;
@@ -79,11 +87,60 @@ static unsigned long updates, nelems;
 uint64_t tot_updates = 0;
 volatile bool received_signal = false;
 
+
+static inline uint64_t get_nanos(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return (uint64_t) ts.tv_sec * SEC_TO_NS + ts.tv_nsec;
+}
+
+static inline void record_latency(uint64_t thread, uint64_t nanos)
+{
+    size_t bucket = (nanos - HIST_START_NS) / HIST_BUCKET_NS;
+    if (bucket >= HIST_BUCKETS) {
+        bucket = HIST_BUCKETS - 1;
+    }
+    thread_hist[thread][bucket]++;
+    /*__sync_fetch_and_add(&c->hist[bucket], 1)*/;
+}
+
+static inline void hist_fract_buckets(uint32_t *hist, uint64_t total,
+        double *fracs, size_t *idxs, size_t num)
+{
+    size_t i, j;
+    uint64_t sum = 0, goals[num];
+    for (j = 0; j < num; j++) {
+        goals[j] = total * fracs[j];
+    }
+    for (i = 0, j = 0; i < HIST_BUCKETS && j < num; i++) {
+        sum += hist[i];
+        for (; j < num && sum >= goals[j]; j++) {
+            idxs[j] = i;
+        }
+    }
+}
+
+static inline int hist_value(size_t i)
+{
+    if (i == HIST_BUCKETS - 1) {
+        return -1;
+    }
+
+    return i * HIST_BUCKET_NS + HIST_START_NS;
+}
+
+uint32_t *hist, *glbl_hist;
+double fracs[6] = { 0.5, 0.9, 0.95, 0.99, 0.999, 0.9999 };
+size_t fracs_pos[sizeof(fracs) / sizeof(fracs[0])];
+
 static void *print_instantaneous_gups(void *arg)
 {
   char *log_filename = (char *)(arg);
   FILE *tot;
   uint64_t tot_gups, tot_last_second_gups = 0;
+  int hx;
+  uint64_t msg_total;
   fprintf(stderr, "Opening instantaneous gups at %s\n", log_filename);
   fflush(stderr);
   tot = fopen(log_filename, "w");
@@ -93,13 +150,41 @@ static void *print_instantaneous_gups(void *arg)
 
   for (;;) {
     tot_gups = 0;
+    msg_total = 0;
     for (int i = 0; i < threads; i++) {
       tot_gups += thread_gups[i];
+
+      for (int j = 0; j < HIST_BUCKETS; j++) {
+        hx = thread_hist[i][j];
+        msg_total += hx;
+        hist[j] += hx;
+        glbl_hist[j] += hx;
+        thread_hist[i][j] = 0;
+      }
     }
-    fprintf(tot, "%ld\t%.10f\n", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
-    fflush(tot);
+    fprintf(tot, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
+    fprintf(stdout, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
     tot_updates += abs(tot_gups - tot_last_second_gups);
     tot_last_second_gups = tot_gups;
+
+    hist_fract_buckets(hist, msg_total, fracs, fracs_pos,
+                sizeof(fracs) / sizeof(fracs[0]));
+
+    fprintf(tot, "50p=%d ns\t90p=%d ns\t95p=%d ns\t"
+           "99p=%d ns\t99.9p=%d ns\t99.99p=%d ns \n",
+           hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
+           hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
+           hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
+    fflush(tot);
+    fprintf(stdout, "50p=%d ns\t90p=%d ns\t95p=%d ns\t"
+           "99p=%d ns\t99.9p=%d ns\t99.99p=%d ns \n",
+           hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
+           hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
+           hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
+    fflush(stdout);
+    memset(hist, 0, sizeof(*hist) * HIST_BUCKETS);
+
+
     sleep(1);
   }
 
@@ -130,6 +215,7 @@ static void *do_gups(void *arguments)
   uint64_t index1, index2;
   uint64_t lfsr;
   uint64_t iters = args->iters;
+  uint64_t start, end;
 
   cpu_set_t cpuset;
   pthread_t thread;
@@ -142,6 +228,7 @@ static void *do_gups(void *arguments)
     perror("pthread_setaffinity_np");
     assert(0);
   }
+  fprintf(stderr, "pinned thread %d to core %d\n", args->tid, start_cpu + args->tid);
 
   srand(args->tid);
   lfsr = rand();
@@ -153,11 +240,12 @@ static void *do_gups(void *arguments)
  // fprintf(hotsetfile, "Thread %d region: %p - %p\thot set: %p - %p\n", args->tid, field, field + (args->size * elt_size), field + args->hot_start, field + args->hot_start + (args->hotsize * elt_size));   
 
   for (i = 0; i < iters || iters == 0; i++) {
+    start = get_nanos();
     lfsr = lfsr_fast(lfsr);
     if (lfsr % 100 < 90) {
       lfsr = lfsr_fast(lfsr);
       index1 = args->hot_start + (lfsr % hotsize);
-      uint64_t  tmp = field[index1];
+      uint64_t tmp = field[index1];
       tmp = tmp + i;
       field[index1] = tmp;
     }
@@ -168,6 +256,8 @@ static void *do_gups(void *arguments)
       tmp = tmp + i;
       field[index2] = tmp;
     }
+    end = get_nanos();
+    record_latency(args->tid, end - start);
     if (i % 1000 == 0) {
       thread_gups[args->tid] += 1000;
     }
@@ -185,6 +275,11 @@ void signal_handler()
 {
   received_signal = true;
   hotsize += (hotsize / 2);
+}
+
+void kill_gups()
+{
+  done_gups = true;
 }
 
 int main(int argc, char **argv)
@@ -205,6 +300,7 @@ int main(int argc, char **argv)
 
   // Stop waiting on receiving signal
   signal(SIGUSR1, signal_handler);
+  signal(SIGUSR2, kill_gups);
 
   if (argc < 6) {
     fprintf(stderr, "Usage: %s [threads] [updates per thread] [exponent] [data size (bytes)] [noremap/remap] [wait] [instantaneous_filename]\n", argv[0]);
@@ -299,7 +395,19 @@ int main(int argc, char **argv)
     ga[i]->size = nelems;
     ga[i]->elt_size = elt_size;
     ga[i]->hot_start = 0;        // hot set at start of thread's region
+    thread_hist[i] = calloc(HIST_BUCKETS, sizeof(*thread_hist[i]));
+    if (thread_hist[i] == NULL) {
+      fprintf(stderr, "error allocating histogram for thread %d failed\n", i);
+    }
+    assert(thread_hist[i] != NULL);
   }
+
+  hist = calloc(HIST_BUCKETS, sizeof(*hist));
+  glbl_hist = calloc(HIST_BUCKETS, sizeof(*glbl_hist));
+  if (hist == NULL || glbl_hist == NULL) {
+    fprintf(stderr, "error allocating global histogram\n");
+  }
+
 
   if(updates != 0) {
     // run through gups once to touch all memory
@@ -370,6 +478,11 @@ int main(int argc, char **argv)
   gups /= (secs * 1.0e9);
   printf("GUPS = %.10f\n", gups);
 
+  for(i = 0; i < HIST_BUCKETS; ++i) {
+    if(glbl_hist[i] != 0) {
+      printf("Hist[%d]=%d\n", i, glbl_hist[i]);
+    }
+  }
   //memset(thread_gups, 0, sizeof(thread_gups));
 
 #if 0
@@ -397,5 +510,4 @@ int main(int argc, char **argv)
 
   return 0;
 }
-
 

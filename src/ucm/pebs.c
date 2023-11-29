@@ -25,7 +25,6 @@
 static struct process_list processes_list;
 static struct page_list dram_free_list;
 static struct page_list nvm_free_list;
-uint64_t global_clock = 0;
 
 uint64_t hemem_pages_cnt = 0;
 uint64_t other_pages_cnt = 0;
@@ -226,11 +225,11 @@ void *pebs_scan_thread()
                       make_cold_request(process, page);
                     }
 
-                    page->accesses[DRAMREAD] >>= (global_clock - page->local_clock);
-                    page->accesses[NVMREAD] >>= (global_clock - page->local_clock);
-                    page->local_clock = global_clock;
+                    page->accesses[DRAMREAD] >>= (process->process_clock - page->local_clock);
+                    page->accesses[NVMREAD] >>= (process->process_clock - page->local_clock);
+                    page->local_clock = process->process_clock;
                     if (page->accesses[j] > PEBS_COOLING_THRESHOLD) {
-                      global_clock++;
+                      process->process_clock++;
                       dram_cools++;
                       nvm_cools++;
                       process->need_cool_dram = true;
@@ -739,7 +738,7 @@ struct hemem_page* partial_cool(struct hemem_process* process, bool dram)
     // compute the access samples this page would have had if it were up to date
     // with cooling
     for (int j = 0; j < NPBUFTYPES; j++) {
-        tmp_accesses[j] = p->accesses[j] >> (global_clock - p->local_clock);
+        tmp_accesses[j] = p->accesses[j] >> (process->process_clock - p->local_clock);
     }
 
     // is the page still hot if it was up to date with cooling?
@@ -931,7 +930,7 @@ void handle_ring_requests(struct hemem_process *process)
     // compute the access samples this page would have had if it were up to date
     // with cooling
     for (int j = 0; j < NPBUFTYPES; j++) {
-        tmp_accesses[j] = page->accesses[j] >> (global_clock - page->local_clock);
+        tmp_accesses[j] = page->accesses[j] >> (process->process_clock - page->local_clock);
     }
     new_hotness = access_to_index(tmp_accesses[DRAMREAD] + tmp_accesses[NVMREAD]);
    
@@ -985,7 +984,7 @@ void handle_ring_requests(struct hemem_process *process)
     // compute the access samples this page would have had if it were up to date
     // with cooling
     for (int j = 0; j < NPBUFTYPES; j++) {
-        tmp_accesses[j] = page->accesses[j] >> (global_clock - page->local_clock);
+        tmp_accesses[j] = page->accesses[j] >> (process->process_clock - page->local_clock);
     }
     new_hotness = access_to_index(tmp_accesses[DRAMREAD] + tmp_accesses[NVMREAD]);
 
@@ -1025,7 +1024,7 @@ struct hemem_page* find_candidate_nvm_page(struct hemem_process *process) {
     }
 
     // check if the page is stale in the list. if it is then oops. move on.
-    tot_accesses = (p->accesses[DRAMREAD] + p->accesses[NVMREAD]) >> (global_clock - p->local_clock);
+    tot_accesses = (p->accesses[DRAMREAD] + p->accesses[NVMREAD]) >> (process->process_clock - p->local_clock);
     starting_page = p;
     while (access_to_index(tot_accesses) < p->hot) {
       if (access_to_index(tot_accesses) < p->hot) {
@@ -1149,7 +1148,7 @@ void process_migrate_up(struct hemem_process *process, uint64_t migrate_up_bytes
     // compute the access samples this page would have had if it were up to date
     // with cooling
     for (int j = 0; j < NPBUFTYPES; j++) {
-      tmp_accesses[j] = p->accesses[j] >> (global_clock - p->local_clock);
+      tmp_accesses[j] = p->accesses[j] >> (process->process_clock - p->local_clock);
     }
 
     new_hotness = access_to_index(tmp_accesses[DRAMREAD] + tmp_accesses[NVMREAD]);

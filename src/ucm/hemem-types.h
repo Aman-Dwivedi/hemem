@@ -75,6 +75,7 @@ struct hemem_process {
   struct page_list nvm_lists[NUM_HOTNESS_LEVELS + 1];
   int cur_cool_in_dram_list;
   int cur_cool_in_nvm_list;
+  uint64_t process_clock;
   struct hemem_page *cur_cool_in_dram;
   struct hemem_page *cur_cool_in_nvm;
   volatile bool need_cool_dram;
