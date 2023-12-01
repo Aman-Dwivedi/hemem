@@ -554,7 +554,7 @@ void tmts_scan_dram(struct hemem_process *process)
 {
   struct hemem_page *page = prev_page(&process->dram_lists[COLD], NULL);
   while(page != NULL) {
-    if(!page->access_bit) { //} && !hemem_get_accessed_bit(page->va, process->uffd)) {
+    if((!page->access_bit) && !(hemem_get_accessed_bit(page->va, process->uffd))) {
       struct hemem_page *npage = prev_page(&process->dram_lists[COLD], page);
       tmts_request_downgrade(process, page);
       page = npage;
@@ -1415,7 +1415,7 @@ void *pebs_policy_thread()
         // we use a negative current miss ratio to signal that we don't have
         // any access information for this process yet, so rest of policy thread
         // shouldn't try to manage it for now 
-        process->current_miss_ratio = -1.0;
+        process->current_miss_ratio = 0;
       }
       
       tmts_handle_ring_requests(process);

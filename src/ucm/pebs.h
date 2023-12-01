@@ -40,10 +40,10 @@ void tmts_request_upgrade(struct hemem_process *, struct hemem_page *);
 void tmts_request_downgrade(struct hemem_process *, struct hemem_page *);
 // Time intervals (in us) to check process list. 
 // Should be common factor of TMTS_CHECK_DRAM_HIGHPRTY and TMTS_CHECK_DRAM_LOWPRTY
-#define TMTS_SLEEP_DELTA (30ul * 1000ul * 1000ul)
+#define TMTS_SLEEP_DELTA (1ul * 1000ul * 1000ul)
 // Time interval (in us) to scan DRAM and downgrade untouched pages for high priority process
 // Paper used 2 minutes for this
-#define TMTS_CHECK_DRAM_HIGHPRTY (2ul * 60ul * 1000ul * 1000ul)
+#define TMTS_CHECK_DRAM_HIGHPRTY (8ul * 60ul * 1000ul * 1000ul)
 // Time interval (in us) to scan DRAM and downgrade untouched pages for low priority process
 // Paper used 2 to 8 minutes for this
 #define TMTS_CHECK_DRAM_LOWPRTY (2ul * 60ul * 1000ul * 1000ul)
