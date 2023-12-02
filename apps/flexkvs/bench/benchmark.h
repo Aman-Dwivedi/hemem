@@ -23,6 +23,8 @@
  */
 
 #include <stdbool.h>
+#ifndef __BENCHMARK_HDR__
+#define __BENCHMARK_HDR__
 
 #include "rng.h"
 
@@ -67,6 +69,14 @@ struct settings {
     bool keybased;
 
     bool skip_load;
+
+    // Server settings
+    int verbose;
+    size_t segsize;
+    size_t hasht_size;
+    size_t segmaxnum;
+    size_t segcqsize;
+    double clean_ratio;
 };
 
 struct key {
@@ -124,3 +134,4 @@ void workload_adjust(struct workload *wl, struct workload *wl2);
 void workload_core_init(struct workload *wl, struct workload_core *wc);
 void workload_op(struct workload *wl, struct workload_core *wc, struct key **k,
         enum workload_op *op);
+#endif /*__BENCHMARK_HDR__*/
