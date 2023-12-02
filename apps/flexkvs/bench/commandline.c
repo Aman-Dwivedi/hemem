@@ -28,6 +28,7 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 #include <utils.h>
+#include "iokvs.h"
 
 #include "benchmark.h"
 
@@ -79,6 +80,14 @@ void init_settings(struct settings *s)
     s->keybased = false;
     s->batchsize = 32;
     s->skip_load = false;
+
+    // Server settings
+    s->verbose = 1;
+    s->segsize = (1024 * (16 * 1024 + 32 + sizeof(struct item)));
+    s->hasht_size = (1ull << 31);
+    s->segmaxnum = 700;
+    s->segcqsize = 1500;
+    s->clean_ratio = 0.8;
 }
 
 int parse_settings(int argc, char *argv[], struct settings *s)
@@ -237,7 +246,17 @@ int parse_settings(int argc, char *argv[], struct settings *s)
                 }
                 break;
             case 'S':
-                settings.target_size = strtoull(optarg, &end, 0);
+                size_t total_size = strtoull(optarg, &end, 0);
+                // Ratio: 1:31 hashtable:segments
+                s->hasht_size = total_size / 32;
+                s->segmaxnum = total_size * 31 / (32 * s->segsize);
+                double hash_size = ((double)s->hasht_size / (1024.0 * 1024.0 * 1024.0));
+                double alloc_size = ((double)s->segmaxnum * (double)s->segsize / (1024.0 * 1024.0 * 1024.0));
+
+                s->target_size = s->segmaxnum * s->segsize;
+                printf("Total mem size: %.2f GB (HT: %.2f GB, Alloc %.2f GB)\n"
+                       "Key target %.2f\n", hash_size + alloc_size, hash_size, 
+                       alloc_size, (double)(s->target_size / (1024.0 * 1024.0 * 1024.0)));
                 if (!*optarg || *end) {
                     fprintf(stderr, "Key seed needs to be an integer.\n");
                     return -1;
@@ -281,7 +300,7 @@ int parse_settings(int argc, char *argv[], struct settings *s)
     s->dstport = strtoul(end, NULL, 10);
 
     if(s->target_size != 0)
-        s->keynum = s->target_size / (s->keysize + s->valuesize);
+        s->keynum = (31 * s->target_size) / (32 * (s->keysize + s->valuesize));
     
     printf("Number of keys = %u (size %.2f GB)\n", s->keynum, 
         ((double)s->keynum * (double)(s->keysize + s->valuesize)) 
