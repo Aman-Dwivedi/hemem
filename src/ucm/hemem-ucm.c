@@ -935,10 +935,10 @@ void hemem_ucm_wp_page(struct hemem_page *page, bool protect) {
   ret = ioctl(page->uffd, UFFDIO_WRITEPROTECT, &wp);
 
   if (ret < 0 && !page->in_free_ring) {
-    if (ret == EBADF || ret == ENOENT) {
+    if (errno == EBADF || errno == ENOENT) {
       if (!(uffds[page->uffd]->exited)) {
         perror("uffdio writeprotect");
-        assert(0);
+        //assert(0);
       }
     } else {
       perror("uffdio writeprotect");

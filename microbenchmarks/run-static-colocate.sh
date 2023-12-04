@@ -11,16 +11,15 @@ rm -f $debugfile
 ./run-perf.sh >/dev/null 2>&1 &
 run_perf_pid=$!
 
+rm data/static/gups/gups-isolated-setup.txt
+sleep 1
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- ./../src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 30
-nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-isolated.txt > /tmp/gups-isolated-setup.txt &
+nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-isolated.txt > data/static/gups/gups-isolated-setup.txt &
 gups_pid=$!
-./../wait-gups.sh /tmp/gups-isolated-setup.txt
-sleep 30
-echo $gups_pid:0.1 > /tmp/miss_ratio_update
-kill -s USR2 $central_pid
-sleep 200
+./../wait-gups.sh data/static/gups/gups-isolated-setup.txt
+sleep 230
 kill -s USR2 $gups_pid
 sleep 1
 kill -9 ${gups_pid}
@@ -30,20 +29,20 @@ cp /tmp/gups-isolated.txt  data/static/gups/isolated-gups.txt
 
 sleep 5
 
+rm data/static/gups/bggups-setup.txt
+rm data/static/gups/gups-gups-setup.txt
+sleep 1
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- ./../src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 30
-nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env START_CPU=14  MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/bggups.txt > /tmp/bggups-setup.txt &
+nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env START_CPU=14  MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 data/static/gups/bggups.txt > data/static/gups/bggups-setup.txt &
 bggups_pid=$!
-perf stat -e instructions -I 1000 -p ${bggups_pid} -o /tmp/bggups-ipc.txt &
-./../wait-gups.sh /tmp/bggups-setup.txt
-nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-gups.txt > /tmp/gups-gups-setup.txt &
+perf stat -e instructions -I 1000 -p ${bggups_pid} -o data/static/gups/bggups-ipc.txt &
+./../wait-gups.sh data/static/gups/bggups-setup.txt
+nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-gups.txt > data/static/gups/gups-gups-setup.txt &
 gups_pid=$!
-./../wait-gups.sh /tmp/gups-gups-setup.txt
-sleep 30
-echo $gups_pid:0.1 > /tmp/miss_ratio_update
-kill -s USR2 $central_pid
-sleep 200
+./../wait-gups.sh data/static/gups/gups-gups-setup.txt
+sleep 230
 kill -s USR2 $gups_pid
 sleep 1
 kill -9 ${gups_pid}
@@ -54,20 +53,20 @@ cp /tmp/gups-gups.txt  data/static/gups/gups-gups.txt
 
 sleep 5
 
+rm data/static/gups/gapbs.txt
+rm data/static/gups/gups-gapbs.txt
+sleep 1
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- ./../src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 30
-nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env OMP_THREAD_LIMIT=8 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./../apps/gapbs/bc -n 50 -g 29 > /tmp/gapbs.txt &
+nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env OMP_THREAD_LIMIT=8 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./../apps/gapbs/bc -n 50 -g 29 > data/static/gups/gapbs.txt &
 gapbs_pid=$!
-perf stat -e instructions -I 1000 -p ${gapbs_pid} -o /tmp/gapbs-ipc.txt  &
-./../wait-gapbs.sh /tmp/gapbs.txt
-nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-gapbs.txt > /tmp/gups-gapbs-setup.txt &
+perf stat -e instructions -I 1000 -p ${gapbs_pid} -o data/static/gups/gapbs-ipc.txt  &
+./../wait-gapbs.sh data/static/gups/gapbs.txt
+nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-gapbs.txt > data/static/gups/gups-gapbs-setup.txt &
 gups_pid=$!
-./../wait-gups.sh /tmp/gups-gapbs-setup.txt
-sleep 30
-echo $gups_pid:0.1 > /tmp/miss_ratio_update
-kill -s USR2 $central_pid
-sleep 200
+./../wait-gups.sh data/static/gups/gups-gapbs-setup.txt
+sleep 230
 kill -s USR2 $gups_pid
 sleep 1
 kill -9 ${gups_pid}
@@ -78,20 +77,20 @@ cp /tmp/gups-gapbs.txt  data/static/gups/gapbs-gups.txt
 
 sleep 5
 
+rm data/static/gups/bt.txt
+rm data/static/gups/gups-bt-setup.txt
+sleep 1
 nice -20 numactl -N0 -m0 --physcpubind=0-3 --  ./../src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 30
-nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env OMP_THREAD_LIMIT=8 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./../apps/nas-bt-c-benchmark/NPB-OMP/bin/bt.E -n 50 -g 28 > /tmp/bt.txt &
+nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env OMP_THREAD_LIMIT=8 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./../apps/nas-bt-c-benchmark/NPB-OMP/bin/bt.E -n 50 -g 28 > data/static/gups/bt.txt &
 bt_pid=$!
-perf stat -e instructions -I 1000 -p ${bt_pid} -o /tmp/bt-ipc.txt  &
-./../wait-bt.sh /tmp/bt.txt
-nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-bt.txt > /tmp/gups-bt-setup.txt &
+perf stat -e instructions -I 1000 -p ${bt_pid} -o data/static/gups/bt-ipc.txt  &
+./../wait-bt.sh data/static/gups/bt.txt
+nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 8 0 38 8 36 0 /tmp/gups-bt.txt > data/static/gups/gups-bt-setup.txt &
 gups_pid=$!
-./../wait-gups.sh /tmp/gups-bt-setup.txt
-sleep 30
-echo $gups_pid:0.1 > /tmp/miss_ratio_update
-kill -s USR2 $central_pid
-sleep 200
+./../wait-gups.sh data/static/gups/gups-bt-setup.txt
+sleep 230
 kill -s USR2 $gups_pid
 sleep 1
 kill -9 ${gups_pid}
