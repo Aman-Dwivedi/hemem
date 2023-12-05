@@ -1015,7 +1015,7 @@ static void *thread_run(void *arg)
     printf("[%d] Start running...\n", cn);
     fflush(stdout);
 
-    while (phase == BENCHMARK_RUNNING) {
+    while (phase == BENCHMARK_RUNNING || phase == BENCHMARK_DYN_HOTSET) {
         send_pending(c, &ia);
     }
 

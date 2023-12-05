@@ -47,6 +47,8 @@ void print_usage(void)
         "                        S is the zipf parameter.\n"
         "  -h, --key-hot=S       Hotset key distribution;\n"
         "                        S is the fraction of keys that are hot.\n"
+        "  -D, --dyn-hs-time=T   Point in time T to switch hotset size. \n"
+        "  -H, --dyn-hs-size=S   S is the fraction of keys that are hot after switch.\n"
         "  -v, --val-size=BYTES  Value size in bytes       [default 1024].\n"
         "  -g, --get-prob=PROB   Probability of GET Reqs.  [default .9].\n"
         "  -T, --time=SECS       Measurement time in [s].  [default 10].\n"
@@ -118,7 +120,7 @@ int parse_settings(int argc, char *argv[], struct settings *s)
             {"dyn-hs-time", required_argument, NULL, 'D'},
             {"dyn-hs-size", required_argument, NULL, 'H'},
         };
-    static const char *short_opts = "t:C:p:k:n:uz:h:v:g:T:w:c:d:s:o:r:S:K:l";
+    static const char *short_opts = "t:C:p:k:n:uz:h:v:g:T:w:c:d:s:o:r:S:K:lD:H:";
     int c, opt_idx, done = 0;
     char *end;
 
@@ -331,6 +333,11 @@ int parse_settings(int argc, char *argv[], struct settings *s)
         printf("Hot set size = %.2f GB\n", s->keydistparams.hot.keys * 
             ((double)s->keynum * (double)(s->keysize + s->valuesize)) 
             / ((double)(1024 * 1024 * 1024)));
+    }
+    if(s->dyn_hotset_time) {
+        printf("Dynamically changing hot set size to %.2f GB at time point %d\n", s->dyn_hotset_size * 
+            ((double)s->keynum * (double)(s->keysize + s->valuesize)) 
+            / ((double)(1024 * 1024 * 1024)), s->dyn_hotset_time);
     }
     // TODO: ensure key size / key num combination is valid
 
