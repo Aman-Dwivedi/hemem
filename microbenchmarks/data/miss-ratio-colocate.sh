@@ -10,9 +10,9 @@ file4="data/colocate/logs/fourth-log.txt"
 file5="data/colocate/logs/fifth-log.txt"
 file6="data/colocate/logs/sixth-log.txt"
 set datafile separator "\t"
-set ytics 0.2
+set ytics 0.25
 set key outside top left horizontal font ",7"
-set xrange [0:400]
+set xrange [0:500]
 set yrange [0:1]
 
 set xlabel "Time (s)"

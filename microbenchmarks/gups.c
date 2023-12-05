@@ -167,7 +167,7 @@ static void *print_instantaneous_gups(void *arg)
       }
     }
     fprintf(tot, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
-    fprintf(stdout, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
+    //fprintf(stdout, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
     tot_updates += abs(tot_gups - tot_last_second_gups);
     tot_last_second_gups = tot_gups;
 
@@ -180,12 +180,12 @@ static void *print_instantaneous_gups(void *arg)
            hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
            hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
     fflush(tot);
-    fprintf(stdout, "50p=%d ns\t90p=%d ns\t95p=%d ns\t"
-           "99p=%d ns\t99.9p=%d ns\t99.99p=%d ns \n",
-           hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
-           hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
-           hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
-    fflush(stdout);
+    //fprintf(stdout, "50p=%d ns\t90p=%d ns\t95p=%d ns\t"
+    //       "99p=%d ns\t99.9p=%d ns\t99.99p=%d ns \n",
+    //       hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
+    //       hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
+    //       hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
+    //fflush(stdout);
     memset(hist, 0, sizeof(*hist) * HIST_BUCKETS);
 
 
