@@ -86,20 +86,18 @@ enum benchmark_phase {
     BENCHMARK_PRELOAD,
     BENCHMARK_WARMUP,
     BENCHMARK_RUNNING,
+    BENCHMARK_DYN_HOTSET,
     BENCHMARK_COOLDOWN,
     BENCHMARK_DONE,
 };
 
 struct settings settings;
 static struct workload workload;
+static struct workload workload2;
 static volatile enum benchmark_phase phase;
 static volatile uint16_t init_count = 0;
 static bool skip_load = false;
 //static uint32_t max_pending = 64;*/
-
-#ifdef DEL_TEST
-static struct workload workload2;
-#endif
 
 struct connection {
     enum conn_state state;
@@ -933,7 +931,10 @@ static inline void send_pending(struct core *c, struct item_allocator *ia)
     struct key *k;
 
     // pick a key and operation 
-    workload_op(&workload, &c->wlc, &k, &op);
+    if(phase != BENCHMARK_DYN_HOTSET)
+        workload_op(&workload, &c->wlc, &k, &op);
+    else
+        workload_op(&workload2, &c->wlc, &k, &op);
 
     // assign a time stamp 
     opaque = get_nanos();
@@ -1076,6 +1077,9 @@ int main(int argc, char *argv[])
     // initialize workload 
     workload_init(&workload);
 
+    if(settings.dyn_hotset_time)
+        workload_init_dyn(&workload, &workload2);
+
     printf("initiating hash table\n");
     hasht_init(settings.hasht_size);
     printf("initiating ialloc\n");
@@ -1143,6 +1147,13 @@ int main(int argc, char *argv[])
         ++current_runtime;
         if(current_runtime == warmup_time)
             printf("Warmup complete\n");
+
+        if(settings.dyn_hotset_time && 
+            current_runtime == settings.dyn_hotset_time) {
+            printf("Dynamically changing hotset to %f%%\n", 
+                settings.dyn_hotset_size);
+            phase = BENCHMARK_DYN_HOTSET;
+        }
         t_cur = get_nanos();
         tp_total = 0;
         msg_total = 0;

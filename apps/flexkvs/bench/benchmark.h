@@ -69,7 +69,9 @@ struct settings {
     bool keybased;
 
     bool skip_load;
-
+    // Settings to dynamically change hotset size
+    double dyn_hotset_size;
+    uint32_t dyn_hotset_time;
     // Server settings
     int verbose;
     size_t segsize;
@@ -130,6 +132,7 @@ void trace_response(uint8_t thread, uint16_t id, uint8_t err);
 void trace_flush(uint8_t thread);
 
 void workload_init(struct workload *wl);
+void workload_init_dyn(struct workload *wl_orig, struct workload *wl_new);
 void workload_adjust(struct workload *wl, struct workload *wl2);
 void workload_core_init(struct workload *wl, struct workload_core *wc);
 void workload_op(struct workload *wl, struct workload_core *wc, struct key **k,

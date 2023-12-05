@@ -81,6 +81,9 @@ void init_settings(struct settings *s)
     s->batchsize = 32;
     s->skip_load = false;
 
+    s->dyn_hotset_size = 0;
+    s->dyn_hotset_time = 0;
+
     // Server settings
     s->verbose = 1;
     s->segsize = (1024 * (16 * 1024 + 32 + sizeof(struct item)));
@@ -112,6 +115,8 @@ int parse_settings(int argc, char *argv[], struct settings *s)
             {"target-size", required_argument, NULL, 'S'},
             {"keysteer",    no_argument,       NULL, 'K'},
             {"skip-load",   no_argument,       NULL, 'l'},
+            {"dyn-hs-time", required_argument, NULL, 'D'},
+            {"dyn-hs-size", required_argument, NULL, 'H'},
         };
     static const char *short_opts = "t:C:p:k:n:uz:h:v:g:T:w:c:d:s:o:r:S:K:l";
     int c, opt_idx, done = 0;
@@ -187,6 +192,22 @@ int parse_settings(int argc, char *argv[], struct settings *s)
                 s->keydistparams.hot.keys = strtod(optarg, &end);
                 if (!*optarg || *end) {
                     fprintf(stderr, "Hotset parameter needs to be a floating "
+                            "point number.\n");
+                    return -1;
+                }
+                break;
+            case 'D':
+                s->dyn_hotset_time = strtoul(optarg, &end, 10);
+                if (!*optarg || *end || s->dyn_hotset_time < 1) {
+                    fprintf(stderr, "Dynamic hotset time needs to be a positive "
+                            "integer\n");
+                    return -1;
+                }
+                break;
+            case 'H':
+                s->dyn_hotset_size = strtod(optarg, &end);
+                if (!*optarg || *end) {
+                    fprintf(stderr, "Dynamic hotset parameter needs to be a floating "
                             "point number.\n");
                     return -1;
                 }

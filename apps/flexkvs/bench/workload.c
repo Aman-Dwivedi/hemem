@@ -55,6 +55,16 @@ void workload_init(struct workload *wl)
     }
 }
 
+void workload_init_dyn(struct workload *wl_orig, struct workload *wl_new)
+{
+    /* prepare rngs and distributions for keys */
+    rng_init(&wl_new->op_rng, settings.op_seed);
+    wl_new->keys = malloc(settings.keynum * (sizeof(struct key)));
+    memcpy(wl_new->keys, wl_orig->keys, settings.keynum * sizeof(struct key));
+    wl_new->keys_num = settings.keynum;
+    distribute_hot(wl_new->keys, wl_new->keys_num, settings.dyn_hotset_size, 0.9);
+}
+
 void workload_adjust(struct workload *wl, struct workload *wl2)
 {
     struct rng key_rng;
