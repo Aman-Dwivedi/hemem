@@ -9,11 +9,11 @@ CFLAGS = -std=gnu99 -g -Wall -Icommon/include -O3 -march=native
 LDFLAGS = -pthread -g -O3
 LDLIBS = -lrt -lm -lpthread -lrt -ldl
 
-all: flexkvs kvsbench
+all: flexkvs #kvsbench
 all-sockets: flexkvs kvsbench
 all-ll: flexkvs-ll
 
-flexkvs: $(addprefix server/,$(FLEXKVS_COMMON) main.o) common/utils.o
+flexkvs: $(addprefix server/,$(FLEXKVS_COMMON) main.o) $(addprefix bench/,$(BENCH_COMMON) main.o) common/utils.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 kvsbench: $(addprefix bench/,$(BENCH_COMMON) main.o) common/utils.o

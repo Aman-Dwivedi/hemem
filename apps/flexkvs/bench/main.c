@@ -1109,7 +1109,7 @@ static inline int hist_value(size_t i)
     return i * HIST_BUCKET_US + HIST_START_US;
 }
 
-int main(int argc, char *argv[])
+int client_main(int argc, char *argv[])
 {
 #ifdef USE_MTCP
     int ret;
