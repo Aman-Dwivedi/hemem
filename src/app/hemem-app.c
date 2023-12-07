@@ -262,6 +262,7 @@ void *handle_remap()
   struct msg_header* header;
   int num_pages;
 
+  internal_call = true;
 #if 0
   cpu_set_t cpuset;
   pthread_t thread;
@@ -312,6 +313,7 @@ void *handle_remap()
       assert(0);
     }
   }
+  internal_call = false;
 }
 
 void hemem_app_init()
@@ -541,6 +543,10 @@ void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
     flags &= ~MAP_HUGETLB;
     LOG("hemem_mmap: unset MAP_HUGETLB\n");
   }
+
+  if (addr != NULL) {
+    flags |= MAP_FIXED;
+  }
   
   // reserve block of memory
   length = PAGE_ROUND_UP(length);
@@ -549,7 +555,10 @@ void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
     perror("mmap");
   }
   assert(p != NULL && p != MAP_FAILED);
-
+  if (addr != NULL) {
+    assert(p == addr);
+  }
+  
   // register with uffd
   struct uffdio_register uffdio_register;
   uffdio_register.range.start = (uint64_t)p;
