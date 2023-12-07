@@ -50,8 +50,8 @@
 
 #define SEC_TO_NS (1000 * 1000 * 1000)
 #define HIST_START_NS 0
-#define HIST_BUCKET_NS 1 
-#define HIST_BUCKETS 4096
+#define HIST_BUCKET_NS 10 
+#define HIST_BUCKETS 256
 #define BUFSIZE 1000000
 
 uint32_t *thread_hist[MAX_THREADS];
@@ -141,6 +141,9 @@ static void *print_instantaneous_gups(void *arg)
   uint64_t tot_gups, tot_last_second_gups = 0;
   int hx;
   uint64_t msg_total;
+  uint64_t current_runtime = 0;
+  uint64_t warmup_runtime = 0;
+
   fprintf(stderr, "Opening instantaneous gups at %s\n", log_filename);
   fflush(stderr);
   tot = fopen(log_filename, "w");
@@ -158,12 +161,14 @@ static void *print_instantaneous_gups(void *arg)
         hx = thread_hist[i][j];
         msg_total += hx;
         hist[j] += hx;
-        glbl_hist[j] += hx;
+        if (current_runtime >= warmup_runtime) {
+          glbl_hist[j] += hx;
+        }
         thread_hist[i][j] = 0;
       }
     }
     fprintf(tot, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
-    fprintf(stdout, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
+    //fprintf(stdout, "%ld\t%.10f\t", rdtscp(), (1.0 * (abs(tot_gups - tot_last_second_gups))) / (1.0e9));
     tot_updates += abs(tot_gups - tot_last_second_gups);
     tot_last_second_gups = tot_gups;
 
@@ -176,14 +181,15 @@ static void *print_instantaneous_gups(void *arg)
            hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
            hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
     fflush(tot);
-    fprintf(stdout, "50p=%d ns\t90p=%d ns\t95p=%d ns\t"
-           "99p=%d ns\t99.9p=%d ns\t99.99p=%d ns \n",
-           hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
-           hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
-           hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
-    fflush(stdout);
+    //fprintf(stdout, "50p=%d ns\t90p=%d ns\t95p=%d ns\t"
+    //       "99p=%d ns\t99.9p=%d ns\t99.99p=%d ns \n",
+    //       hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
+    //       hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
+    //       hist_value(fracs_pos[4]), hist_value(fracs_pos[5]));
+    //fflush(stdout);
     memset(hist, 0, sizeof(*hist) * HIST_BUCKETS);
 
+    ++current_runtime;
 
     sleep(1);
   }
@@ -480,7 +486,8 @@ int main(int argc, char **argv)
 
   for(i = 0; i < HIST_BUCKETS; ++i) {
     if(glbl_hist[i] != 0) {
-      printf("Hist[%d]=%d\n", i, glbl_hist[i]);
+      printf("Hist[%d]=%d\n", i*HIST_BUCKET_NS, glbl_hist[i]);
+      fflush(stdout);
     }
   }
   //memset(thread_gups, 0, sizeof(thread_gups));
