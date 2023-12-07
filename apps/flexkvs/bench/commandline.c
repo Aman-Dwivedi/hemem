@@ -123,6 +123,9 @@ int parse_settings(int argc, char *argv[], struct settings *s)
     static const char *short_opts = "t:C:p:k:n:uz:h:v:g:T:w:c:d:s:o:r:S:K:lD:H:";
     int c, opt_idx, done = 0;
     char *end;
+    size_t total_size;
+    double hash_size;
+    double alloc_size;
 
     while (!done) {
         c = getopt_long(argc, argv, short_opts, long_opts, &opt_idx);
@@ -269,12 +272,12 @@ int parse_settings(int argc, char *argv[], struct settings *s)
                 }
                 break;
             case 'S':
-                size_t total_size = strtoull(optarg, &end, 0);
+                total_size = strtoull(optarg, &end, 0);
                 // Ratio: 1:31 hashtable:segments
                 s->hasht_size = total_size / 32;
                 s->segmaxnum = total_size * 31 / (32 * s->segsize);
-                double hash_size = ((double)s->hasht_size / (1024.0 * 1024.0 * 1024.0));
-                double alloc_size = ((double)s->segmaxnum * (double)s->segsize / (1024.0 * 1024.0 * 1024.0));
+                hash_size = ((double)s->hasht_size / (1024.0 * 1024.0 * 1024.0));
+                alloc_size = ((double)s->segmaxnum * (double)s->segsize / (1024.0 * 1024.0 * 1024.0));
 
                 s->target_size = s->segmaxnum * s->segsize;
                 printf("Total mem size: %.2f GB (HT: %.2f GB, Alloc %.2f GB)\n"
