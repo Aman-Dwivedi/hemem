@@ -47,6 +47,7 @@
 
 #include "benchmark.h"
 #include "socket_shim.h"
+#include "iokvs.h"
 
 #ifdef USE_MTCP
 # include <mtcp_api.h>
@@ -85,20 +86,18 @@ enum benchmark_phase {
     BENCHMARK_PRELOAD,
     BENCHMARK_WARMUP,
     BENCHMARK_RUNNING,
+    BENCHMARK_DYN_HOTSET,
     BENCHMARK_COOLDOWN,
     BENCHMARK_DONE,
 };
 
 struct settings settings;
 static struct workload workload;
+static struct workload workload2;
 static volatile enum benchmark_phase phase;
 static volatile uint16_t init_count = 0;
 static bool skip_load = false;
-/*static uint32_t max_pending = 64;*/
-
-#ifdef DEL_TEST
-static struct workload workload2;
-#endif
+//static uint32_t max_pending = 64;*/
 
 struct connection {
     enum conn_state state;
@@ -161,7 +160,7 @@ static inline void record_latency(struct core *c, uint64_t nanos)
         bucket = HIST_BUCKETS - 1;
     }
     c->hist[bucket]++;
-    /*__sync_fetch_and_add(&c->hist[bucket], 1)*/;
+    //__sync_fetch_and_add(&c->hist[bucket], 1);
 }
 
 #ifdef PRINT_STATS
@@ -173,7 +172,7 @@ static inline uint64_t read_cnt(uint64_t *p)
 }
 #endif
 
-/* Open connection */
+// Open connection 
 static inline void conn_connect(struct core *c, struct connection *co)
 {
     int fd, cn, ret;
@@ -188,7 +187,7 @@ static inline void conn_connect(struct core *c, struct connection *co)
 
     fprintf(stderr, "opening conn %d\n", cn);
     sprintf(buf, "kvs_sock%d", cn);
-    /* create socket */
+    // create socket 
     //if ((fd = ss_socket(sc, AF_INET, SOCK_STREAM, IPPROTO_TCP))
     if ((fd = ss_socket(sc, AF_UNIX, SOCK_STREAM, 0))
         < 0)
@@ -198,43 +197,43 @@ static inline void conn_connect(struct core *c, struct connection *co)
         abort();
     }
 
-    /* make socket non-blocking */
+    // make socket non-blocking 
     if ((ret = ss_set_nonblock(sc, fd)) != 0) {
         fprintf(stderr, "[%d] set_nonblock failed: %d\n", cn, ret);
         abort();
     }
 
-    /* disable nagling */
+    // disable nagling 
     //if (ss_set_nonagle(sc, fd) != 0) {
     //    fprintf(stderr, "[%d] setsockopt TCP_NODELAY failed\n", cn);
     //    abort();
     //}
 
-    /* add to epoll */
+    // add to epoll 
     ev.data.ptr = co;
     ev.events = SS_EPOLLIN | SS_EPOLLOUT | SS_EPOLLHUP | SS_EPOLLERR;
     if (ss_epoll_ctl(sc, c->ep, SS_EPOLL_CTL_ADD, fd, &ev) < 0) {
       fprintf(stderr, "[%d] adding to epoll failed\n", cn);
     }
 
-    /* initialize address of socket */
+    // initialize address of socket 
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, buf, sizeof(addr.sun_path)-1);
     //addr.sin_addr.s_addr = htonl(settings.dstip);
     //addr.sin_port = htons(settings.dstport);
 
-    /* initiate non-blocking connect*/
+    // initiate non-blocking connect
     ret = ss_connect(sc, fd, (struct sockaddr *) &addr, sizeof(addr));
     if (ret == 0) {
-        /* success */
+        // success 
         CONN_DEBUG(c, co, "Connection succeeded\n");
         co->state = CONN_OPEN;
     } else if (ret < 0 && errno == EINPROGRESS) {
-        /* still going on */
+        // still going on 
         CONN_DEBUG(c, co, "Connection pending: %d\n", fd);
         co->state = CONN_CONNECTING;
     } else {
-        /* opening connection failed */
+        // opening connection failed 
         fprintf(stderr, "[%d] connect failed: %d\n", cn, ret);
         abort();
     }
@@ -258,7 +257,7 @@ static inline void conn_epupdate(struct core *c, struct connection *co, int wr)
     if (co->ep_wr == wr) {
         return;
     }
-    /*printf("conn_epupdate(%p, %d)\n", co, wr);*/
+    //printf("conn_epupdate(%p, %d)\n", co, wr);
 
     ev.data.ptr = co;
     ev.events = SS_EPOLLHUP | SS_EPOLLERR | (wr ? SS_EPOLLOUT : 0) | SS_EPOLLIN;
@@ -272,7 +271,7 @@ static inline void conn_epupdate(struct core *c, struct connection *co, int wr)
     STATS_ADD(c, epupd, 1);
 }
 
-/* receive response on connection */
+// receive response on connection 
 static inline int conn_recv(struct core *c, struct connection *co,
         enum workload_op *op, uint16_t *err, uint32_t *opaque)
 {
@@ -283,7 +282,7 @@ static inline int conn_recv(struct core *c, struct connection *co,
     ssize_t ret;
     //uint64_t tsc;
 
-    /* while response incomplete: receive more */
+    // while response incomplete: receive more 
     while (co->rx_len < sizeof(*res) ||
             co->rx_len < sizeof(*res) + ntohl(res->response.bodylen))
     {
@@ -297,18 +296,18 @@ static inline int conn_recv(struct core *c, struct connection *co,
             co->rx_len += ret;
 	    //printf("got %zu, waiting for %zu\n", ret, sizeof(*res) + ntohl(res->response.bodylen));
         } else if (ret < 0 && errno == EAGAIN) {
-            /* nothing to receive */
+            // nothing to receive 
             //printf("nothing to receive...\n");
 	    return 1;
         } else {
-            /* errror, close connection */
+            // errror, close connection 
             fprintf(stderr, "[%d] read failed: %d\n", cn, (int) ret);
             abort();
             return -1;
         }
     }
 
-    /* response is complete now */
+    // response is complete now 
     if (res->response.magic != PROTOCOL_BINARY_RES) {
         fprintf(stderr, "[%d] invalid magic on response: %x\n", cn,
                 res->response.magic);
@@ -338,7 +337,7 @@ static inline int conn_recv(struct core *c, struct connection *co,
     return 0;
 }
 
-/* send out request on connection */
+// send out request on connection 
 static inline int conn_send(struct core *c, struct connection *co)
 {
     int cn;
@@ -358,7 +357,7 @@ static inline int conn_send(struct core *c, struct connection *co)
     if (ret > 0) {
         co->tx_off += ret;
         if (co->tx_off == co->tx_len) {
-            /* sent whole message */
+            // sent whole message 
             co->tx_off = 0;
             co->tx_len = 0;
             return 0;
@@ -366,70 +365,124 @@ static inline int conn_send(struct core *c, struct connection *co)
             return 1;
         }
     } else if (ret < 0 && errno != EAGAIN) {
-        /* send failed */
+        // send failed 
         fprintf(stderr, "[%d] write failed: %d\n", cn, (int) ret);
         abort();
         return -1;
     } else if (ret < 0 && errno == EAGAIN) {
-        /* send would block */
+        // send would block 
         return 1;
     }
 
     return -1;
 }
 
-static inline void set_request(struct core *c, struct connection *co,
-        struct key *k, uint32_t opaque)
+static size_t clean_log(struct item_allocator *ia, bool idle)
 {
+    struct item *it, *nit;
+    size_t n;
+
+    if (!idle) {
+        // We're starting processing for a new request 
+        ialloc_cleanup_nextrequest(ia);
+    }
+
+    n = 0;
+    while ((it = ialloc_cleanup_item(ia, idle)) != NULL) {
+        n++;
+        if (it->refcount != 1) {
+            if ((nit = ialloc_alloc(ia, sizeof(*nit) + it->keylen + it->vallen,
+                    true)) == NULL)
+            {
+                fprintf(stderr, "Warning: ialloc_alloc failed during cleanup :-/\n");
+                abort();
+            }
+
+            nit->hv = it->hv;
+            nit->vallen = it->vallen;
+            nit->keylen = it->keylen;
+            memcpy(item_key(nit), item_key(it), it->keylen + it->vallen);
+            hasht_put(nit, it);
+            item_unref(nit);
+        }
+        item_unref(it);
+    }
+    return n;
+}
+
+static inline void set_request(struct core *c, struct connection *co,
+        struct key *k, uint32_t opaque, struct item_allocator *ia)
+{
+
     protocol_binary_request_set *set =
         (protocol_binary_request_set *) co->tx_buf;
-    protocol_binary_request_header *req = &set->message.header;
+    //protocol_binary_request_header *req = &set->message.header;
 
     assert(co->tx_off == 0);
     assert(co->tx_len == 0);
     assert(sizeof(*set) + k->keylen + settings.valuesize <= BUFSIZE);
 
-    req->request.magic = PROTOCOL_BINARY_REQ;
-    req->request.opcode = PROTOCOL_BINARY_CMD_SET;
-    req->request.keylen = htons(k->keylen);
-    req->request.extlen = 8;
-    req->request.datatype = 0;
-    req->request.reserved = 0;
-    req->request.bodylen = htonl(8 + k->keylen + settings.valuesize);
-    req->request.opaque = opaque;
-    req->request.cas = 0;
-    set->message.body.flags = 0;
-    set->message.body.expiration = 0;
+    // Begin insertion
+    void *v = (uint8_t *)set + sizeof(*set) + k->keylen;
+    uint16_t kl = k->keylen;
+    uint32_t vl = settings.valuesize;
+    
+    // allocate item 
+    assert(ia != NULL);
+    uint32_t h = jenkins_hash(k->key, kl);
 
-    memcpy(set + 1, k->key, k->keylen);
+    struct item *it = hasht_get(k->key, kl, h);
 
-    co->tx_len = sizeof(*set) + k->keylen + settings.valuesize;
+    if(it == NULL) {
+        //printf("item not found\n");
+        it = ialloc_alloc(ia, sizeof(struct item) + kl + vl, false);
+        //printf("Allocated %p: size %lu\n", it, sizeof(struct item) + kl + vl);
+        it->hv = h;
+        it->vallen = vl;
+        it->keylen = kl;
+        memcpy(item_key(it), k->key, kl);
+        memcpy(item_value(it), v, vl);
+
+        hasht_put(it, NULL);
+        // Ensure successful insert
+        assert(it == hasht_get(k->key, kl, h));
+        item_unref(it);
+    } else {
+        //printf("item found\n");
+        it->hv = h;
+        it->vallen = vl;
+        it->keylen = kl;
+        memcpy(item_key(it), k->key, kl);
+        memcpy(item_value(it), v, vl);
+    }
+    item_unref(it);
+    clean_log(ia, 1);
 }
 
 static inline void get_request(struct core *c, struct connection *co,
-        struct key *k, uint32_t opaque)
+        struct key *k, uint32_t opaque, struct item_allocator *ia)
 {
     protocol_binary_request_get *get =
         (protocol_binary_request_get *) co->tx_buf;
-    protocol_binary_request_header *req = &get->message.header;
-
-    assert(co->tx_off == 0);
-    assert(co->tx_len == 0);
     assert(sizeof(*get) + k->keylen <= BUFSIZE);
 
-    req->request.magic = PROTOCOL_BINARY_REQ;
-    req->request.opcode = PROTOCOL_BINARY_CMD_GET;
-    req->request.keylen = htons(k->keylen);
-    req->request.extlen = 0;
-    req->request.datatype = 0;
-    req->request.reserved = 0;
-    req->request.bodylen = htonl(k->keylen);
-    req->request.opaque = opaque;
-    req->request.cas = 0;
+    // lookup item
+    uint16_t kl = k->keylen;
+    uint32_t h = jenkins_hash(k->key, kl);
+    struct item *it = hasht_get(k->key, kl, h);
 
-    memcpy(get + 1, k->key, k->keylen);
-
-    co->tx_len = sizeof(*get) + k->keylen;
+    // calculate response length
+    uint64_t rsl = sizeof(protocol_binary_response_get);
+    if (it != NULL) {
+        rsl += it->vallen;
+    }
+    
+    // add item value
+    if (it != NULL) {
+        memcpy(get + 1, item_value(it), it->vallen);
+        item_unref(it);
+        clean_log(ia, 1);
+    }
 }
 
 static inline void delete_request(struct core *c, struct connection *co,
@@ -468,7 +521,7 @@ static void poll_conns(struct core *c, int timeout)
 
     cn = c->id;
 
-    /* get events */
+    // get events 
     if ((ret = ss_epoll_wait(c->sc, c->ep, evs, 32, timeout)) < 0) {
         fprintf(stderr, "[%d] wait_conns epoll_wait failed\n", cn);
         abort();
@@ -486,13 +539,13 @@ static void poll_conns(struct core *c, int timeout)
         //    abort();
         //}
 
-        /* check for errors on the connection */
+        // check for errors on the connection 
         if ((events & (SS_EPOLLERR | SS_EPOLLHUP)) != 0) {
             fprintf(stderr, "[%d] wait_conns error on conn\n", cn);
             abort();
         }
 
-        /* check connection state */
+        // check connection state 
         slen = sizeof(status);
         if (ss_getsockopt(c->sc, co->fd, SOL_SOCKET, SO_ERROR,
                     &status, &slen) < 0)
@@ -521,7 +574,7 @@ static void poll_conns(struct core *c, int timeout)
     }
 }
 
-/* initialize core */
+// initialize core 
 static void prepare_core(struct core *c)
 {
     int cn = c->id;
@@ -533,7 +586,7 @@ static void prepare_core(struct core *c)
     struct sockaddr_in addr;
 #endif
 
-    /* Affinitize threads */
+    // Affinitize threads 
 #ifdef USE_MTCP
     if ((ret = mtcp_core_affinitize(cn)) != 0) {
         fprintf(stderr, "[%d] mtcp_core_affinitize failed: %d\n", cn, ret);
@@ -545,7 +598,7 @@ static void prepare_core(struct core *c)
         abort();
     }
 
-    /* initialize address of socket */
+    // initialize address of socket 
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(settings.dstip);
     addr.sin_port = htons(settings.dstport);
@@ -561,29 +614,24 @@ static void prepare_core(struct core *c)
 #endif
     c->sc = sc;
 
-    /* create epoll */
-    if ((c->ep = ss_epoll_create(sc, 4 * settings.conns)) < 0) {
-        fprintf(stderr, "[%d] epoll_create failed\n", c->ep);
-        abort();
-    }
-
-    /* Allocate histogram */
+    // Allocate histogram 
     if ((c->hist = calloc(HIST_BUCKETS, sizeof(*c->hist))) == NULL) {
         fprintf(stderr, "[%d] allocating histogram failed\n", cn);
         abort();
     }
 
-    /* Allocate connection structs */
+    // Allocate connection structs 
     if ((c->conns = calloc(settings.conns, sizeof(*c->conns))) == NULL) {
         fprintf(stderr, "[%d] allocating connection structs failed\n", cn);
         abort();
     }
 
-    /* Initiate connections */
+    // Initiate connections 
     c->conn_pending = 0;
     c->msgs_pending = 0;
     c->q_first = c->q_last = NULL;
     for (i = 0; i < settings.conns; i++) {
+        // STILL NEED THIS! Buffers used for storing data read from KVS
         if ((buf = malloc(BUFSIZE * 2)) == NULL) {
             fprintf(stderr, "[%d] allocating conn buffer failed\n", cn);
         }
@@ -592,20 +640,12 @@ static void prepare_core(struct core *c)
         c->conns[i].state = CONN_CONNECTING;
         c->conns[i].fd = -1;
         c->conn_pending++;
-        conn_connect(c, &c->conns[i]);
-        while (c->conn_pending >= 16) {
-            poll_conns(c, 0);
-        }
-    }
-
-    while (c->conn_pending > 0) {
-        poll_conns(c, 0);
     }
     fprintf(stderr, "core ready: %d\n", cn);
 
 }
 
-/* wait for all connections to be established */
+// wait for all connections to be established 
 static void wait_conns(struct core *c)
 {
     uint32_t i;
@@ -617,91 +657,27 @@ static void wait_conns(struct core *c)
     }
 }
 
-/* wait for all connections to be established */
-static void load_keys(struct core *c)
+// wait for all connections to be established 
+static void load_keys(struct core *c, struct item_allocator *ia)
 {
-    int cn, ret, l;
-    size_t i, pending;
+    int cn;
+    size_t i;
     struct key *k;
-    struct connection *co;
-    ss_epev_t evs[8];
-    uint32_t events, opaque;
-    uint16_t err;
-    enum workload_op op;
-
     cn = c->id;
 
-    /* set connections to trigger epoll OUT events */
-    for (i = 0; i < MIN(32, settings.conns); i++) {
-        conn_epupdate(c, &c->conns[i], 1);
-    }
-
     i = cn;
-    pending = 0;
-    while (i < workload.keys_num || pending > 0) {
-        if ((ret = ss_epoll_wait(c->sc, c->ep, evs, 8, -1)) < 0) {
-            fprintf(stderr, "[%d] load_keys epoll_wait failed\n", cn);
-            abort();
-        }
-
-        for (l = 0; l < ret; l++) {
-            co = evs[l].data.ptr;
-            events = evs[l].events;
-
-            /* check for errors on the connection */
-            if ((events & (SS_EPOLLERR | SS_EPOLLHUP)) != 0) {
-                fprintf(stderr, "[%d] load_keys error on conn\n", cn);
-                perror("epoll");
-		abort();
-            }
-
-            if ((events & SS_EPOLLIN) == SS_EPOLLIN) {
-                /* data ready to receive */
-                if (conn_recv(c, co, &op, &err, &opaque) == 0) {
-                    if (err != 0) {
-                        fprintf(stderr, "[%d] load_keys set failed:%x\n", cn, err);
-                    }
-                    pending--;
-                    co->pending--;
-                    conn_epupdate(c, co, 1);
-                }
-            } else {
-                /* ready to send */
-                assert((events & SS_EPOLLOUT) == SS_EPOLLOUT);
-                if (co->tx_len == 0 && i < workload.keys_num) {
-                    /* send out new request */
-                    //printf("[%d:%p] i=%zu  keys_num=%zu\n", cn, co, i, workload.keys_num);
-                    k = &workload.keys[i];
-                    set_request(c, co, k, 0);
-                    if (conn_send(c, co) == 0) {
-                        /* fully sent out -> poll for RX */
-                        conn_epupdate(c, co, 0);
-                    }
-                    i += settings.threads;
-                    pending++;
-                    co->pending++;
-                } else if (co->tx_len == 0) {
-                    /* no more keys to initialize -> poll for RX */
-                    conn_epupdate(c, co, 0);
-                } else {
-                    if (conn_send(c, co) == 0) {
-                        /* fully sent out -> poll for RX */
-                        conn_epupdate(c, co, 0);
-                    }
-                }
-            }
-
-        }
+    //pending = 0;
+    while (i < workload.keys_num) {
+        // send out new request 
+        //printf("[%d:%p] i=%zu  keys_num=%zu\n", cn, co, i, workload.keys_num);
+        k = &workload.keys[i];
+        set_request(c, &c->conns[0], k, 0, ia);
+        i += settings.threads;
     }
-
-    /* set connections to trigger epoll OUT events */
-    /*for (i = 0; i < settings.conns; i++) {
-        conn_epupdate(c, &c->conns[i], 1);
-    }*/
 }
 
 #ifdef DEL_TEST
-/* wait for all connections to be established */
+// wait for all connections to be established 
 static void load_other_keys(struct core *c)
 {
     int cn, ret, l;
@@ -716,7 +692,7 @@ static void load_other_keys(struct core *c)
 
     cn = c->id;
 
-    /* set connections to trigger epoll OUT events */
+    // set connections to trigger epoll OUT events 
     for (i = 0; i < MIN(32, settings.conns); i++) {
         conn_epupdate(c, &c->conns[i], 1);
     }
@@ -734,7 +710,7 @@ static void load_other_keys(struct core *c)
             co = evs[l].data.ptr;
             events = evs[l].events;
 
-            /* check for errors on the connection */
+            // check for errors on the connection 
             if ((events & (SS_EPOLLERR | SS_EPOLLHUP)) != 0) {
                 fprintf(stderr, "[%d] load_keys error on conn\n", cn);
                 perror("epoll");
@@ -742,7 +718,7 @@ static void load_other_keys(struct core *c)
             }
 
             if ((events & SS_EPOLLIN) == SS_EPOLLIN) {
-                /* data ready to receive */
+                // data ready to receive 
                 if (conn_recv(c, co, &op, &err, &opaque) == 0) {
                     if (err != 0) {
                         fprintf(stderr, "[%d] load_keys set failed:%x\n", cn, err);
@@ -753,10 +729,10 @@ static void load_other_keys(struct core *c)
                 }
 		//printf("received data, pending %d\n", pending);
             } else {
-                /* ready to send */
+                // ready to send 
                 assert((events & SS_EPOLLOUT) == SS_EPOLLOUT);
                 if (co->tx_len == 0 && i < workload2.keys_num) {
-                    /* send out new request */
+                    // send out new request 
                     printf("[%d:%p] i=%zu j=%zu  keys_num=%zu\n", cn, co, i, j, workload2.keys_num);
                     rng = (rand() % 10) + 1;
 	
@@ -771,7 +747,7 @@ static void load_other_keys(struct core *c)
 
 		    set_request(c, co, k, 0);
                     if (conn_send(c, co) == 0) {
-                        /* fully sent out -> poll for RX */
+                        // fully sent out -> poll for RX 
                         conn_epupdate(c, co, 0);
                     }
 
@@ -783,12 +759,12 @@ static void load_other_keys(struct core *c)
                     pending++;
                     co->pending++;
                 } else if (co->tx_len == 0) {
-                    /* no more keys to initialize -> poll for RX */
+                    // no more keys to initialize -> poll for RX 
 		    //printf("no more keys, i=%d, workload=%d, pending=%d\n", i, workload2.key_num, pending);
                     conn_epupdate(c, co, 0);
                 } else {
                     if (conn_send(c, co) == 0) {
-                        /* fully sent out -> poll for RX */
+                        // fully sent out -> poll for RX 
 			//printf("can't send\n");
                         conn_epupdate(c, co, 0);
                     }
@@ -799,13 +775,13 @@ static void load_other_keys(struct core *c)
         }
     }
 
-    /* set connections to trigger epoll OUT events */
+    // set connections to trigger epoll OUT events 
     /*for (i = 0; i < settings.conns; i++) {
         conn_epupdate(c, &c->conns[i], 1);
     }*/
 }
 
-/* wait for all connections to be established */
+// wait for all connections to be established 
 static void delete_keys(struct core *c)
 {
     int cn, ret, l;
@@ -819,7 +795,7 @@ static void delete_keys(struct core *c)
 
     cn = c->id;
 
-    /* set connections to trigger epoll OUT events */
+    // set connections to trigger epoll OUT events 
     for (i = 0; i < MIN(32, settings.conns); i++) {
         conn_epupdate(c, &c->conns[i], 1);
     }
@@ -837,7 +813,7 @@ static void delete_keys(struct core *c)
             co = evs[l].data.ptr;
             events = evs[l].events;
 
-            /* check for errors on the connection */
+            // check for errors on the connection 
             if ((events & (SS_EPOLLERR | SS_EPOLLHUP)) != 0) {
                 fprintf(stderr, "[%d] delete_keys error on conn\n", cn);
                 perror("epoll");
@@ -845,7 +821,7 @@ static void delete_keys(struct core *c)
             }
 
             if ((events & SS_EPOLLIN) == SS_EPOLLIN) {
-                /* data ready to receive */
+                // data ready to receive 
                 if (conn_recv(c, co, &op, &err, &opaque) == 0) {
                     if (err != 0) {
                         fprintf(stderr, "[%d] load_keys set failed:%x\n", cn, err);
@@ -856,27 +832,27 @@ static void delete_keys(struct core *c)
 		    //printf("received data, pending %d\n", pending);
                 } else printf("conn_recv failed\n");
             } else {
-                /* ready to send */
+                // ready to send 
                 assert((events & SS_EPOLLOUT) == SS_EPOLLOUT);
                 if (co->tx_len == 0 && i < workload2.keys_num) {
-                    /* send out new request */
+                    // send out new request 
                     //printf("[%d:%p] i=%zu  keys_num=%zu\n", cn, co, i, workload2.keys_num);
                     k = &workload2.keys[i];
                     delete_request(c, co, k, 0);
                     if (conn_send(c, co) == 0) {
-                        /* fully sent out -> poll for RX */
+                        // fully sent out -> poll for RX 
                         conn_epupdate(c, co, 0);
                     }
                     i += settings.threads;
                     pending++;
                     co->pending++;
                 } else if (co->tx_len == 0) {
-                    /* no more keys to initialize -> poll for RX */
+                    // no more keys to initialize -> poll for RX 
                     conn_epupdate(c, co, 0);
 		    //printf("no more keys\n");
                 } else {
                     if (conn_send(c, co) == 0) {
-                        /* fully sent out -> poll for RX */
+                        // fully sent out -> poll for RX 
 			//printf("can't send\n");
                         conn_epupdate(c, co, 0);
                     }
@@ -900,13 +876,13 @@ static inline void conn_events(struct core *c, struct connection *co,
 
     cn = c->id;
 
-    /* check for errors on the connection */
+    // check for errors on the connection 
     if ((events & (SS_EPOLLERR | SS_EPOLLHUP)) != 0) {
         fprintf(stderr, "[%d] error on connection\n", cn);
         abort();
     }
 
-    /* receive responses */
+    // receive responses 
     while (co->pending > 0 && conn_recv(c, co, &op, &err, &opaque) == 0) {
         record_latency(c, (uint32_t) get_nanos() - opaque);
 
@@ -937,93 +913,75 @@ static inline void conn_events(struct core *c, struct connection *co,
         }
     }
 
-    /* try to send out any remaining tx buffer contents */
+    // try to send out any remaining tx buffer contents 
     if (co->tx_len != 0) {
         conn_send(c, co);
     }
 
-    /* make sure we epoll for write iff we're actually blocked on writes */
+    // make sure we epoll for write iff we're actually blocked on writes 
     conn_epupdate(c, co, co->tx_len != 0);
 
 }
 
-static inline void send_pending(struct core *c)
+static inline void send_pending(struct core *c, struct item_allocator *ia)
 {
-    struct connection *co;
+    //struct connection *co;
     uint32_t opaque;
     enum workload_op op = 0;
     struct key *k;
 
-    /* send out new requests */
-    while (c->msgs_pending < settings.pending && c->q_first != NULL) {
-        co = c->q_first;
-        c->q_first = co->next;
-        if (c->q_first == NULL)
-          c->q_last = NULL;
-
-        /* pick a key and operation */
+    // pick a key and operation 
+    if(phase != BENCHMARK_DYN_HOTSET)
         workload_op(&workload, &c->wlc, &k, &op);
+    else
+        workload_op(&workload2, &c->wlc, &k, &op);
 
-        /* assign a time stamp */
-        opaque = get_nanos();
+    // assign a time stamp 
+    opaque = get_nanos();
 
-        /* assemble request */
-        if (op == WL_OP_GET) {
-            get_request(c, co, k, opaque);
-            STATS_ADD(c, tx_get, 1);
-        } else {
-            set_request(c, co, k, opaque);
-            STATS_ADD(c, tx_set, 1);
-        }
-
-        /* send out request */
-        conn_send(c, co);
-        conn_epupdate(c, co, co->tx_len != 0);
-
-        co->pending++;
-        c->msgs_pending++;
+    // assemble request 
+    if (op == WL_OP_GET) {
+        get_request(c, &c->conns[0], k, opaque, ia);
+        STATS_ADD(c, tx_get, 1);
+        STATS_ADD(c, rx_get, 1);
+    } else {
+        set_request(c, &c->conns[0], k, opaque, ia);
+        STATS_ADD(c, tx_set, 1);
+        STATS_ADD(c, rx_set, 1);
     }
+    // Arbitrarily mark as success, I guess
+    STATS_ADD(c, rx_success, 1);
+    record_latency(c, (uint32_t) get_nanos() - opaque);
 }
 
 
 static void *thread_run(void *arg)
 {
+    struct item_allocator ia;
     struct core *c = arg;
     int i, cn, ret, ep, num_evs;
-    struct connection *co;
-    ssctx_t sc;
     ss_epev_t *evs;
 
-    /* initiate core struct and connections */
+    // initiate core struct and connections 
     prepare_core(c);
 
     cn = c->id;
-    ep = c->ep;
-    sc = c->sc;
+    ialloc_init_allocator(&ia);
 
-    printf("[%d] Waiting for connections...\n", cn);
-    fflush(stdout);
-
-    /* wait for connections to be established */
-    wait_conns(c);
-
-     printf("[%d] Waiting for connections done\n", cn);
-    fflush(stdout);
-
-   /* wait until we start running */
+   // wait until we start running 
     while (phase < BENCHMARK_PRELOAD) {
         sched_yield();
     }
 
     printf("[%d] Preloading keys...\n", cn);
     fflush(stdout);
-    /* pre-load keys */
+    // pre-load keys 
 #ifdef DEL_TEST
     printf("[%d] Preloading more keys...\n", cn);
     load_other_keys(c);
 #else
     if (!skip_load) {
-        load_keys(c);
+        load_keys(c, &ia);
     }
 #endif
 
@@ -1039,7 +997,7 @@ static void *thread_run(void *arg)
 
     __sync_fetch_and_add(&init_count, 1);
 
-   /* wait until we start running */
+   // wait until we start warmup 
     while (phase < BENCHMARK_WARMUP) {
         sched_yield();
     }
@@ -1050,35 +1008,15 @@ static void *thread_run(void *arg)
         abort();
     }
 
-    /* wait until we start running */
+    // wait until we start running 
     while (phase < BENCHMARK_RUNNING) {
         sched_yield();
     }
     printf("[%d] Start running...\n", cn);
     fflush(stdout);
 
-    send_pending(c);
-
-    while (phase == BENCHMARK_RUNNING) {
-        /* epoll, wait for events */
-        if ((ret = ss_epoll_wait(sc, ep, evs, num_evs, -1)) < 0) {
-            fprintf(stderr, "[%d] epoll_wait failed\n", cn);
-            abort();
-        }
-
-        for (i = 0; i < ret; i++) {
-            co = evs[i].data.ptr;
-            conn_events(c, co, evs[i].events);
-        }
-
-        send_pending(c);
-    }
-
-    for(i = 0; i < settings.conns; ++i) {
-        if ((ret = ss_close(sc, c->conns[i].fd)) < 0) {
-            fprintf(stderr, "[%d] ss_close failed\n", cn);
-            abort();
-        }
+    while (phase == BENCHMARK_RUNNING || phase == BENCHMARK_DYN_HOTSET) {
+        send_pending(c, &ia);
     }
 
     return NULL;
@@ -1109,7 +1047,7 @@ static inline int hist_value(size_t i)
     return i * HIST_BUCKET_US + HIST_START_US;
 }
 
-int client_main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 #ifdef USE_MTCP
     int ret;
@@ -1125,7 +1063,7 @@ int client_main(int argc, char *argv[])
 
     setlocale(LC_NUMERIC, "");
 
-    /* parse settings from command line */
+    // parse settings from command line 
     //fprintf(stderr, "settings1 %d\n", settings.valuesize);
 
     init_settings(&settings);
@@ -1136,8 +1074,18 @@ int client_main(int argc, char *argv[])
     num_threads = settings.threads;
     skip_load = settings.skip_load;
 
-    /* initialize workload */
+    // initialize workload 
     workload_init(&workload);
+
+    if(settings.dyn_hotset_time)
+        workload_init_dyn(&workload, &workload2);
+
+    printf("initiating hash table\n");
+    hasht_init(settings.hasht_size);
+    printf("initiating ialloc\n");
+    ialloc_init();
+
+    //iallocs = calloc(num_threads, sizeof(*iallocs));
 
 #ifdef DEL_TEST
     workload_adjust(&workload, &workload2);
@@ -1151,11 +1099,11 @@ int client_main(int argc, char *argv[])
 #endif
 
     srand(0);
-    /* allocate core structs */
+    // allocate core structs 
     assert(sizeof(*cs) % 64 == 0);
     cs = calloc(num_threads, sizeof(*cs));
 
-    /* allocate instrumentation structs */
+    // allocate instrumentation structs 
     ttp = calloc(num_threads, sizeof(*ttp));
     hist = calloc(HIST_BUCKETS, sizeof(*hist));
     glbl_hist = calloc(HIST_BUCKETS, sizeof(*glbl_hist));
@@ -1199,6 +1147,13 @@ int client_main(int argc, char *argv[])
         ++current_runtime;
         if(current_runtime == warmup_time)
             printf("Warmup complete\n");
+
+        if(settings.dyn_hotset_time && 
+            current_runtime == settings.dyn_hotset_time) {
+            printf("Dynamically changing hotset to %f%%\n", 
+                settings.dyn_hotset_size);
+            phase = BENCHMARK_DYN_HOTSET;
+        }
         t_cur = get_nanos();
         tp_total = 0;
         msg_total = 0;

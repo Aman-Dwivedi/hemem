@@ -30,39 +30,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include "../bench/benchmark.h"
 
 
 /******************************************************************************/
-/* Settings */
-
-/** Configurable settings */
-struct settings {
-    /** Size of log segments in bytes */
-    size_t segsize;
-    /** Maximal number of segments to use  */
-    size_t segmaxnum;
-    /** Size of seqment clean queue */
-    size_t segcqsize;
-    /** Size of hashtable in bytes */
-    size_t hasht_size;
-    /** Segment cleaning ratio */
-    double clean_ratio;
-    /** UDP port to listen on */
-    uint16_t udpport;
-    /** Verbosity for log messages. */
-    uint8_t verbose;
-    /** Number of cores */
-    uint8_t numcores;
-    /** Config file */
-    char *config_file;
-};
-
 /** Global settings */
 extern struct settings settings;
-
-/** Initialize global settings from command-line. */
-int settings_init(int argc, char *argv[]);
-int client_main(int argc, char *argv[]);
 
 /******************************************************************************/
 /* Hash table operations */
@@ -238,8 +211,8 @@ static inline size_t item_totalsz(struct item *it)
 /** Increment item's refcount (original refcount must not be 0). */
 static inline void item_ref(struct item *it)
 {
-    uint16_t old;
-    old = __sync_add_and_fetch(&it->refcount, 1);
+    //uint16_t old;
+    __sync_add_and_fetch(&it->refcount, 1);
     //assert(old != 1);
 }
 
