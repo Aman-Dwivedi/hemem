@@ -9,5 +9,5 @@ do
 done
 
 echo "kvsbench Ready"
-echo `pidof flexkvs`:0.1 > /tmp/miss_ratio_update
+echo `pidof kvsbench`:0.05 > /tmp/miss_ratio_update
 kill -s USR2 `pidof central-manager`

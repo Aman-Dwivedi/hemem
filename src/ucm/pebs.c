@@ -1147,6 +1147,10 @@ void *pebs_policy_thread()
         // shouldn't try to manage it for now 
         process->current_miss_ratio = 0;
       }
+	    
+      for (int xxx = LAST_HEMEM_THREAD + 1; xxx < PEBS_NPROCS; xxx++) {
+	      process->samples[xxx] = 0;
+	    }
     
       // figure out how much dram we need to reallocate based on ratio diffsj
       // if our current miss ratio is less than target, then we are good and
@@ -1717,9 +1721,6 @@ void count_pages()
     dram_usage += ((double)process->current_dram) / (1024.0 * 1024.0 * 1024.0);
     nvm_usage += ((double)process->current_nvm) / (1024.0 * 1024.0 * 1024.0);
     //tmp = process;
-	  for (int xxx = LAST_HEMEM_THREAD + 1; xxx < PEBS_NPROCS; xxx++) {
-	    process->samples[xxx] = 0;
-	  }
     process = process->next;
     //pthread_mutex_unlock(&(tmp->process_lock));
   }

@@ -157,6 +157,11 @@ int add_process()
   request.target_miss_ratio = target_miss_ratio;
   request.req_dram = required_dram;
   request.header.msg_size = sizeof(request);
+#ifdef LLAMA
+  request.zero = true;
+#else
+  request.zero = false;
+#endif
 
   response = process_request(request_fd, &request);
   status = response->header.status;  

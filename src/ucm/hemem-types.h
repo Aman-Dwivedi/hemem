@@ -18,6 +18,10 @@ enum HOTNESS {
   HOT4,
   HOT5,
   HOT6,
+  HOT7,
+  HOT8,
+  HOT9,
+  HOT10,
   NUM_HOTNESS_LEVELS
 };
 
@@ -49,6 +53,9 @@ struct hemem_process {
   bool exited;
   bool valid_uffd;
   int remap_fd;
+
+  bool zero;
+
 #ifdef HEMEM_QOS
   _Atomic uint64_t volatile accessed_pages[NPBUFTYPES];
   _Atomic uint64_t volatile wrong_memtype;

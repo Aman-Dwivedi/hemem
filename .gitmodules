@@ -13,3 +13,6 @@
 [submodule "apps/nas-bt-c-benchmark"]
 	path = apps/nas-bt-c-benchmark
 	url = git@bitbucket.org:ajaustin/nas-bt-c-benchmark.git
+[submodule "apps/llama.cpp"]
+	path = apps/llama.cpp
+	url = https://github.com/ggerganov/llama.cpp.git
