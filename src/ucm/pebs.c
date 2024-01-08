@@ -1218,7 +1218,7 @@ void *pebs_policy_thread()
     }
 
 
-    LOG("ratio of memory needed %.4f\tratio of memory taking %.4f\n", memshare_need, memshare_take);
+    //LOG("ratio of memory needed %.4f\tratio of memory taking %.4f\n", memshare_need, memshare_take);
 
     // give share of migration bandwidth to processes that need more dram
     for (i = 0; i < num_need_memory; i++) {
@@ -1297,14 +1297,14 @@ void *pebs_policy_thread()
         }
       } else {
         // TODO: What to do here? I imagine take some ratio or something?
-        LOG("delta dram needed: %ld\tdelta dram taking: %ld\n", delta_need, delta_take);
+        //LOG("delta dram needed: %ld\tdelta dram taking: %ld\n", delta_need, delta_take);
       }
       migrate_share = PEBS_MIGRATE_RATE / ((processes_list.numentries > 0) ? processes_list.numentries : 1);
     } else {
       migrate_share = intraprocess_migrate / ((processes_list.numentries > 0) ? processes_list.numentries : 1);
     }
 
-    LOG("dram needed: %ld\tdram taking %ld\n", delta_need, delta_take);
+    //LOG("dram needed: %ld\tdram taking %ld\n", delta_need, delta_take);
     
     // make room on DRAM for by migrating down pages for each process
     process = peek_process(&processes_list);
@@ -1315,14 +1315,14 @@ void *pebs_policy_thread()
         // process can have more DRAM, so it can migrate things up if it can
         process->migrate_up_bytes = process->dram_delta;
         process->migrate_down_bytes = 0;
-        LOG("process %u (current miss ratio: %f) allocated %ld more dram, now allowed %lu dram\n", process->pid, process->current_miss_ratio, process->dram_delta, process->current_dram + process->dram_delta);
-        LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_down_bytes, process->migrate_up_bytes);
+        //LOG("process %u (current miss ratio: %f) allocated %ld more dram, now allowed %lu dram\n", process->pid, process->current_miss_ratio, process->dram_delta, process->current_dram + process->dram_delta);
+        //LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_down_bytes, process->migrate_up_bytes);
       } else if (process->dram_delta < 0) {
         // process has too much dram, so it needs to migrate things down
         process->migrate_up_bytes = 0;
         process->migrate_down_bytes = -1 * process->dram_delta;
-        LOG("process %u (current miss ratio: %f) allocated %ld less dram, now allowed %lu dram\n", process->pid, process->current_miss_ratio, -1 * process->dram_delta, process->current_dram - process->dram_delta);
-        LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_down_bytes, process->migrate_up_bytes);
+        //LOG("process %u (current miss ratio: %f) allocated %ld less dram, now allowed %lu dram\n", process->pid, process->current_miss_ratio, -1 * process->dram_delta, process->current_dram - process->dram_delta);
+        //LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_down_bytes, process->migrate_up_bytes);
       } else {
         // process has correct amount of DRAM, need to migrate down enough pages
         // to free dram for the hot NVM pages. 
@@ -1368,7 +1368,7 @@ void *pebs_policy_thread()
         }
         process->migrate_down_bytes = migrate_down_bytes;
         process->migrate_up_bytes = process->migrate_down_bytes;
-        LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_up_bytes, process->migrate_down_bytes);
+        //LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_up_bytes, process->migrate_down_bytes);
       }
 
       // migrate down first to free up DRAM space

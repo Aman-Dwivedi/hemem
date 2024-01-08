@@ -18,8 +18,6 @@ DYNTIME=400
 HOTFRAC1=0.15
 HOTFRAC2=0.30
 
-rm data/dynamic/perf/llama.txt
-sleep 1
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- ./src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 30
@@ -27,17 +25,19 @@ nice -20 numactl -N0 -m0 --physcpubind=19-23 -- env MISS_RATIO=1.0 LD_PRELOAD=/h
 llama_pid=$!
 perf stat -e instructions -I 1000 -p ${llama_pid} -o data/dynamic/perf/llama-ipc.txt &
 ./wait-llama.sh data/dynamic/perf/llama.txt
-nice -20 numactl -N0 -m0 --physcpubind=14-18 -- env OMP_THREAD_LIMIT=4 MISS_RATIO=0.5 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./apps/gapbs/bc -n 50 -g 28 > data/dynamic/perf/gapbs.txt &
-gapbs_pid=$!
-./wait-gapbs.sh data/dynamic/perf/gapbs.txt
-perf stat -e instructions -I 1000 -p ${gapbs_pid} -o data/dynamic/perf/gapbs-ipc.txt &
+nice -20 numactl -N0 -m0 --physcpubind=14-18 -- env OMP_THREAD_LIMIT=4 REQ_DRAM=0 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./apps/nas-bt-c-benchmark/NPB-OMP/bin/bt.E > data/dynamic/perf/bt.txt 2>&1 &
+bt_pid=$!
+perf stat -e instructions -I 1000 -p ${bt_pid} -o data/dynamic/perf/bt-ipc.txt &
+./wait-bt.sh data/dynamic/perf/bt.txt
 nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} -D ${DYNTIME} -H ${HOTFRAC2} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > data/dynamic/perf/flexkvs.txt &
 flexkvs_pid=$!
 ./wait-kvsbench.sh data/dynamic/perf/flexkvs.txt
 sleep 200
-kill -s USR1 ${gapbs_pid}
+echo ${bt_pid}:0.5 > /tmp/miss_ratio_update
+kill -s USR2 ${central_pid}
+kill -s USR1 ${bt_pid}
 wait ${flexkvs_pid}
-kill -9 ${gapbs_pid}
+kill -9 ${bt_pid}
 kill -9 ${llama_pid}
 kill -9 ${central_pid}
 
@@ -46,3 +46,5 @@ pkill perf
 
 
 cp /tmp/log-$flexkvs_pid.txt data/dynamic/logs/flexkvs-log.txt
+cp /tmp/log-$bt_pid.txt data/dynamic/logs/bt-log.txt
+cp /tmp/log-$llama_pid.txt data/dynamic/logs/llama-log.txt

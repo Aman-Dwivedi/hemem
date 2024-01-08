@@ -941,7 +941,7 @@ void hemem_ucm_wp_page(struct hemem_page *page, bool protect) {
   if (ret < 0) {
     if (errno == EBADF || errno == ENOENT) {
       // page was freed, probably fine to just ignore
-      LOG("tried to write-protect a feeed page");
+      LOG("tried to write-protect a feeed page: pid: %d addr: %ld\n", page->pid, page->va);
     } else {
       perror("uffdio writeprotect");
       assert(0);
