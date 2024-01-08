@@ -715,6 +715,7 @@ int main(int argc, char *argv[])
     while (n_ready < num_threads);
     printf("Starting maintenance\n");
     fflush(stdout);
+    client_main(argc - 4, &argv[4]);
     while (1) {
         maintenance();
     }

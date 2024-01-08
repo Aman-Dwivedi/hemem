@@ -28,6 +28,7 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 #include <utils.h>
+#include "iokvs.h"
 
 #include "benchmark.h"
 
@@ -46,6 +47,8 @@ void print_usage(void)
         "                        S is the zipf parameter.\n"
         "  -h, --key-hot=S       Hotset key distribution;\n"
         "                        S is the fraction of keys that are hot.\n"
+        "  -D, --dyn-hs-time=T   Point in time T to switch hotset size. \n"
+        "  -H, --dyn-hs-size=S   S is the fraction of keys that are hot after switch.\n"
         "  -v, --val-size=BYTES  Value size in bytes       [default 1024].\n"
         "  -g, --get-prob=PROB   Probability of GET Reqs.  [default .9].\n"
         "  -T, --time=SECS       Measurement time in [s].  [default 10].\n"
@@ -68,7 +71,7 @@ void init_settings(struct settings *s)
     s->keynum = 1000;
     s->keydist = DIST_UNIFORM;
     s->valuesize = 16 * 1024;
-    s->get_prob = 0.9;
+    s->get_prob = 0.5;
     s->warmup_time = 120;
     s->cooldown_time = 5;
     s->run_time = 600;
@@ -79,6 +82,17 @@ void init_settings(struct settings *s)
     s->keybased = false;
     s->batchsize = 32;
     s->skip_load = false;
+
+    s->dyn_hotset_size = 0;
+    s->dyn_hotset_time = 0;
+
+    // Server settings
+    s->verbose = 1;
+    s->segsize = (1024 * (16 * 1024 + 32 + sizeof(struct item)));
+    s->hasht_size = (1ull << 31);
+    s->segmaxnum = 700;
+    s->segcqsize = 1500;
+    s->clean_ratio = 0.8;
 }
 
 int parse_settings(int argc, char *argv[], struct settings *s)
@@ -103,10 +117,15 @@ int parse_settings(int argc, char *argv[], struct settings *s)
             {"target-size", required_argument, NULL, 'S'},
             {"keysteer",    no_argument,       NULL, 'K'},
             {"skip-load",   no_argument,       NULL, 'l'},
+            {"dyn-hs-time", required_argument, NULL, 'D'},
+            {"dyn-hs-size", required_argument, NULL, 'H'},
         };
-    static const char *short_opts = "t:C:p:k:n:uz:h:v:g:T:w:c:d:s:o:r:S:K:l";
+    static const char *short_opts = "t:C:p:k:n:uz:h:v:g:T:w:c:d:s:o:r:S:K:lD:H:";
     int c, opt_idx, done = 0;
     char *end;
+    size_t total_size;
+    double hash_size;
+    double alloc_size;
 
     while (!done) {
         c = getopt_long(argc, argv, short_opts, long_opts, &opt_idx);
@@ -182,6 +201,22 @@ int parse_settings(int argc, char *argv[], struct settings *s)
                     return -1;
                 }
                 break;
+            case 'D':
+                s->dyn_hotset_time = strtoul(optarg, &end, 10);
+                if (!*optarg || *end || s->dyn_hotset_time < 1) {
+                    fprintf(stderr, "Dynamic hotset time needs to be a positive "
+                            "integer\n");
+                    return -1;
+                }
+                break;
+            case 'H':
+                s->dyn_hotset_size = strtod(optarg, &end);
+                if (!*optarg || *end) {
+                    fprintf(stderr, "Dynamic hotset parameter needs to be a floating "
+                            "point number.\n");
+                    return -1;
+                }
+                break;
             case'g':
                 s->get_prob = strtod(optarg, &end);
                 if (!*optarg || *end || s->get_prob < 0 || s->get_prob > 1) {
@@ -237,7 +272,17 @@ int parse_settings(int argc, char *argv[], struct settings *s)
                 }
                 break;
             case 'S':
-                settings.target_size = strtoull(optarg, &end, 0);
+                total_size = strtoull(optarg, &end, 0);
+                // Ratio: 1:31 hashtable:segments
+                s->hasht_size = total_size / 32;
+                s->segmaxnum = total_size * 31 / (32 * s->segsize);
+                hash_size = ((double)s->hasht_size / (1024.0 * 1024.0 * 1024.0));
+                alloc_size = ((double)s->segmaxnum * (double)s->segsize / (1024.0 * 1024.0 * 1024.0));
+
+                s->target_size = s->segmaxnum * s->segsize;
+                printf("Total mem size: %.2f GB (HT: %.2f GB, Alloc %.2f GB)\n"
+                       "Key target %.2f\n", hash_size + alloc_size, hash_size, 
+                       alloc_size, (double)(s->target_size / (1024.0 * 1024.0 * 1024.0)));
                 if (!*optarg || *end) {
                     fprintf(stderr, "Key seed needs to be an integer.\n");
                     return -1;
@@ -281,7 +326,7 @@ int parse_settings(int argc, char *argv[], struct settings *s)
     s->dstport = strtoul(end, NULL, 10);
 
     if(s->target_size != 0)
-        s->keynum = s->target_size / (s->keysize + s->valuesize);
+        s->keynum = (31 * s->target_size) / (32 * (s->keysize + s->valuesize));
     
     printf("Number of keys = %u (size %.2f GB)\n", s->keynum, 
         ((double)s->keynum * (double)(s->keysize + s->valuesize)) 
@@ -291,6 +336,11 @@ int parse_settings(int argc, char *argv[], struct settings *s)
         printf("Hot set size = %.2f GB\n", s->keydistparams.hot.keys * 
             ((double)s->keynum * (double)(s->keysize + s->valuesize)) 
             / ((double)(1024 * 1024 * 1024)));
+    }
+    if(s->dyn_hotset_time) {
+        printf("Dynamically changing hot set size to %.2f GB at time point %d\n", s->dyn_hotset_size * 
+            ((double)s->keynum * (double)(s->keysize + s->valuesize)) 
+            / ((double)(1024 * 1024 * 1024)), s->dyn_hotset_time);
     }
     // TODO: ensure key size / key num combination is valid
 

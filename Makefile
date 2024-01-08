@@ -90,7 +90,7 @@ NUMA_CMD_CLIENT ?= numactl -N${OTHER_NODE} -m${OTHER_NODE}
 PRELOAD  ?= 
 
 SET_LOW_PRTY = MISS_RATIO=1.0
-SET_HIGH_PRTY = MISS_RATIO=0.1
+SET_HIGH_PRTY = MISS_RATIO=1.0
 
 CMD_KILL_ALL := \
 	list_descendants () { \
@@ -110,19 +110,19 @@ DRAMSIZE   ?= $$((128*1024*1024*1024))
 NVMOFFSET  ?= 0
 DRAMOFFSET ?= 0
 
-REQ_DRAM	?= $$((64*1024*1024*1024))
+REQ_DRAM	?= $$((128*1024*1024*1024))
 
 # Configs for app runs
 FLEXKV_THDS ?= 4
 APP_THDS    ?= 8
 ifeq (${BASE_NODE}, 1)
-MGR_CPUS    ?= 24-31
-APP_CPUS    ?= 32-41
-FLEXKV_CPUS ?= 42-47
+MGR_CPUS    ?= 24-27
+APP_CPUS    ?= 34-47
+FLEXKV_CPUS ?= 28-33
 else
 MGR_CPUS    ?= 0-3
-APP_CPUS    ?= 4-17
-FLEXKV_CPUS ?= 18-23
+APP_CPUS    ?= 10-23
+FLEXKV_CPUS ?= 4-9
 endif
 
 FLEXKV_SIZE ?= $$((64*1024*1024*1024))
@@ -141,7 +141,7 @@ SETUP_CMD = export LD_LIBRARY_PATH=./src:./Hoard/src:$LD_LIBRARY_PATH; \
 HEMEM_PRELOAD = env LD_PRELOAD=./src/libhemem.so
 POPULATE_PRELOAD = env LD_PRELOAD=./src/libmmap_populate.so
 
-RUN_MGR = nice -20 ${NUMA_CMD} --physcpubind=${MGR_CPUS} ./src/central-manager > $${file}_mem_usage.txt & \
+RUN_MGR = SAMPLE_PERIODS=$${SAMPLE_PERIODS_FILE} nice -20 ${NUMA_CMD} --physcpubind=${MGR_CPUS} ./src/central-manager > $${file}_mem_usage.txt & \
 	CTRL_MGR=$$!; \
 	sleep 20;
 
@@ -180,13 +180,12 @@ run_flexkvs: ./apps/flexkvs/flexkvs ./apps/flexkvs/kvsbench
 		${PRELOAD} ./apps/flexkvs/flexkvs flexkvs.conf ${FLEXKV_THDS} ${FLEXKV_SIZE} > ${RES}/${PREFIX}_server.txt & \
 	FLEXKVS_SERVER=$$!; \
 	if [ ${ZNUMA_MEASURE} -gt 0 ]; then \
-		perf stat -e faults -I 1000 -p $${FLEXKVS_SERVER} -o ${RES}/${PREFIX}_flexkv_faults.txt &\
+		perf stat -e faults -I 1000 -p $${FLEXKVS_SERVER} -o ${RES}/${PREFIX}_flexkv_faults.txt & \
 		${NUMASTAT} $${FLEXKVS_SERVER} > ${RES}/${PREFIX}_flexkv_mem_usage.txt & \
 	fi; \
+	perf stat -e instructions,LLC-store-misses,LLC-load-misses -I 1000 -p $${FLEXKVS_SERVER} -o ${RES}/${PREFIX}_flexkv_cache.txt & \
 	./wait-kvs.sh ${RES}/${PREFIX}_server.txt; \
-	if [ ${WAIT_BG} -gt 0 ]; then \
-	  ./${WAIT_SCRIPT}; \
-	fi;\
+	./wait-kvsbench.sh ${RES}/${PREFIX}_flexkv.txt & \
 	${FLEXKV_NICE} ${NUMA_CMD_CLIENT} \
 		./apps/flexkvs/kvsbench -t ${FLEXKV_THDS} -T ${FLEXKV_RUNTIME} -w ${FLEXKV_WARMUP} \
 		-h ${FLEXKV_HOT_FRAC} 127.0.0.1:11211 -S $$((15*${FLEXKV_SIZE}/16)) > ${RES}/${PREFIX}_flexkv.txt; \
@@ -234,7 +233,7 @@ run_gups_pebs: ./microbenchmarks/gups-pebs
 		./scripts/numastat.sh $${GUPS_PID} > ${RES}/$${PREFIX}_gups_pebs_mem_usage.txt & \
 	fi;
 
-GAPBS_TRIALS ?= 10
+GAPBS_TRIALS ?= 50
 run_gapbs: ./apps/gapbs/bc
 	NVMSIZE=${NVMSIZE} DRAMSIZE=${DRAMSIZE} NVMOFFSET=${NVMOFFSET} \
 	DRAMOFFSET=${DRAMOFFSET} OMP_THREAD_LIMIT=${APP_THDS} REQ_DRAM=${REQ_DRAM} \
@@ -304,6 +303,20 @@ run_bg_hw_tier: all
 	wait;\
 	pkill flexkvs;
 
+run_znuma_gups: all
+	PREFIX=bg_znuma_tier; \
+	BASE_NODE=1;\
+	NUMA_CMD="numactl -N 1 -m 1,3"; \
+	FLEXKV_SIZE=$$((320*1024*1024*1024)); \
+	$(MAKE) run_flexkvs  WAIT_BG=1 WAIT_SCRIPT="wait-gups.sh ${RES}/$${PREFIX}_gups.txt" ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX}_gups & \
+	FLEX_PID=$$!;\
+	$(MAKE) run_gups ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" APP_SIZE=${GUPS_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX} & \
+	wait $${FLEX_PID}; \
+	pkill flexkvs;\
+	pkill gups;\
+	pkill perf;\
+	pkill numastat.sh;\
+
 run_znuma_tier: all
 	PREFIX=bg_znuma_tier; \
 	BASE_NODE=1;\
@@ -314,7 +327,7 @@ run_znuma_tier: all
 	pkill flexkvs;\
 	$(MAKE) run_flexkvs  WAIT_BG=1 WAIT_SCRIPT="wait-gups.sh ${RES}/$${PREFIX}_gups.txt" ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX}_gups & \
 	FLEX_PID=$$!;\
-	$(MAKE) run_gups BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" APP_SIZE=${GUPS_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX} & \
+	$(MAKE) run_gups ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" APP_SIZE=${GUPS_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX} & \
 	wait $${FLEX_PID}; \
 	pkill flexkvs;\
 	pkill gups;\
@@ -322,7 +335,7 @@ run_znuma_tier: all
 	pkill numastat.sh;\
 	$(MAKE) run_flexkvs WAIT_BG=1 WAIT_SCRIPT="wait-gapbs.sh ${RES}/$${PREFIX}_gapbs.txt" ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX}_gapbs & \
 	FLEX_PID=$$!;\
-	$(MAKE) run_gapbs BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" APP_SIZE=${GAPBS_SIZE} PRELOAD="${POPULATE_PRELOAD}" GAPBS_TRIALS=$$((${GAPBS_TRIALS} * 3)) PREFIX=$${PREFIX} & \
+	$(MAKE) run_gapbs ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" APP_SIZE=${GAPBS_SIZE} PRELOAD="${POPULATE_PRELOAD}" GAPBS_TRIALS=$$((${GAPBS_TRIALS} * 3)) PREFIX=$${PREFIX} & \
 	wait $${FLEX_PID}; \
 	pkill flexkvs;\
 	pkill bc;\
@@ -330,7 +343,7 @@ run_znuma_tier: all
 	pkill numastat.sh;\
 	$(MAKE) run_flexkvs WAIT_BG=1 WAIT_SCRIPT="wait-bt.sh ${RES}/$${PREFIX}_bt.txt" ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX}_bt & \
 	FLEX_PID=$$!;\
-	$(MAKE) run_bt BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" BT_SIZE=${BT_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX} & \
+	$(MAKE) run_bt ZNUMA_MEASURE=1 BASE_NODE=$${BASE_NODE} NUMA_CMD="$${NUMA_CMD}" BT_SIZE=${BT_SIZE} PRELOAD="${POPULATE_PRELOAD}" PREFIX=$${PREFIX} & \
 	wait $${FLEX_PID}; \
 	pkill flexkvs;\
 	pkill bt.E;\
@@ -430,38 +443,102 @@ run_bg_mini_sw_tier: all
 	wait; \
 	pkill flexkvs;
 
-# FlexKV occupies first half of DRAM/NVM, and other app the other half	
-run_eval_apps: all	
-	# HeMem runs	
+run_eval_flexkvs: all
+	SAMPLE_PERIODS_FILE="flexkvs_colocate_periods.txt"; \
 	FLEXKV_SIZE=$$((320*1024*1024*1024)); \
 	${SETUP_CMD} \
 	PREFIX=eval_qtmem; \
 	${RUN_PERF} \
 	file=${RES}/$${PREFIX}_Isolated; \
 	${RUN_MGR} \
-	$(MAKE) run_flexkvs PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_Isolated; \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_Isolated; \
 	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_Isolated.txt; \
+	${KILL_PERF}
+
+run_eval_gups: all
+	SAMPLE_PERIODS_FILE="flexkvs_colocate_periods.txt"; \
+	FLEXKV_SIZE=$$((320*1024*1024*1024)); \
+	${SETUP_CMD} \
+	PREFIX=eval_qtmem; \
+	${RUN_PERF} \
 	file=${RES}/$${PREFIX}_gups_fkvs; \
 	${RUN_MGR} \
-	$(MAKE) run_flexkvs WAIT_BG=1 WAIT_SCRIPT="wait-gups.sh ${RES}/$${PREFIX}_gups_pebs.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_gups & \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 WAIT_BG=1 WAIT_SCRIPT="wait-gups.sh ${RES}/$${PREFIX}_gups_pebs.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_gups & \
 	FLEX_PID=$$!; \
 	$(MAKE) run_gups_pebs PRELOAD="${HEMEM_PRELOAD}" APP_SIZE=${GUPS_SIZE} PREFIX=$${PREFIX} & \
 	wait $${FLEX_PID}; \
 	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_gups.txt; \
+	${KILL_PERF}
+
+run_eval_gapbs: all
+	SAMPLE_PERIODS_FILE="flexkvs_gapbs_colocate_periods.txt"; \
+	FLEXKV_SIZE=$$((320*1024*1024*1024)); \
+	${SETUP_CMD} \
+	PREFIX=eval_qtmem; \
+	${RUN_PERF} \
 	file=${RES}/$${PREFIX}_gapbs_fkvs; \
 	${RUN_MGR} \
-	$(MAKE) run_flexkvs WAIT_BG=1 WAIT_SCRIPT="wait-gapbs.sh ${RES}/$${PREFIX}_gapbs.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_gapbs & \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 WAIT_BG=1 WAIT_SCRIPT="wait-gapbs.sh ${RES}/$${PREFIX}_gapbs.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_gapbs & \
 	FLEX_PID=$$!;\
 	$(MAKE) run_gapbs PRELOAD="${HEMEM_PRELOAD}" APP_SIZE=${GAPBS_SIZE} PREFIX=$${PREFIX} & \
 	wait $${FLEX_PID}; \
 	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_gapbs.txt; \
+	${KILL_PERF}
+
+run_eval_bt: all
+	SAMPLE_PERIODS_FILE="flexkvs_colocate_periods.txt"; \
+	FLEXKV_SIZE=$$((320*1024*1024*1024)); \
+	${SETUP_CMD} \
+	PREFIX=eval_qtmem; \
+	${RUN_PERF} \
 	file=${RES}/$${PREFIX}_bt_fkvs; \
 	${RUN_MGR} \
-	$(MAKE) run_flexkvs WAIT_BG=1 WAIT_SCRIPT="wait-bt.sh ${RES}/$${PREFIX}_bt.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_bt & \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 WAIT_BG=1 WAIT_SCRIPT="wait-bt.sh ${RES}/$${PREFIX}_bt.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_bt & \
 	FLEX_PID=$$!;\
 	$(MAKE) run_bt PRELOAD="${HEMEM_PRELOAD}" BT_SIZE=${BT_SIZE} PREFIX=$${PREFIX} & \
 	wait $${FLEX_PID}; \
 	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_bt.txt; \
+	${KILL_PERF}
+
+run_eval_apps: all	
+	SAMPLE_PERIODS_FILE="flexkvs_gapbs_colocate_periods.txt"; \
+	FLEXKV_SIZE=$$((320*1024*1024*1024)); \
+	${SETUP_CMD} \
+	PREFIX=eval_qtmem; \
+	${RUN_PERF} \
+	file=${RES}/$${PREFIX}_Isolated; \
+	${RUN_MGR} \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_Isolated; \
+	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_Isolated.txt; \
+	file=${RES}/$${PREFIX}_gups_fkvs; \
+	${RUN_MGR} \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 WAIT_BG=1 WAIT_SCRIPT="wait-gups.sh ${RES}/$${PREFIX}_gups_pebs.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_gups & \
+	FLEX_PID=$$!; \
+	$(MAKE) run_gups_pebs PRELOAD="${HEMEM_PRELOAD}" APP_SIZE=${GUPS_SIZE} PREFIX=$${PREFIX} & \
+	wait $${FLEX_PID}; \
+	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_gups.txt; \
+	file=${RES}/$${PREFIX}_gapbs_fkvs; \
+	${RUN_MGR} \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 WAIT_BG=1 WAIT_SCRIPT="wait-gapbs.sh ${RES}/$${PREFIX}_gapbs.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_gapbs & \
+	FLEX_PID=$$!;\
+	$(MAKE) run_gapbs PRELOAD="${HEMEM_PRELOAD}" APP_SIZE=${GAPBS_SIZE} PREFIX=$${PREFIX} & \
+	wait $${FLEX_PID}; \
+	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_gapbs.txt; \
+	file=${RES}/$${PREFIX}_bt_fkvs; \
+	${RUN_MGR} \
+	$(MAKE) run_flexkvs MAXMEM_MEASURE=1 WAIT_BG=1 WAIT_SCRIPT="wait-bt.sh ${RES}/$${PREFIX}_bt.txt" PRELOAD="${HEMEM_PRELOAD}" FLEXKV_SIZE=$${FLEXKV_SIZE} PREFIX=$${PREFIX}_bt & \
+	FLEX_PID=$$!;\
+	$(MAKE) run_bt PRELOAD="${HEMEM_PRELOAD}" BT_SIZE=${BT_SIZE} PREFIX=$${PREFIX} & \
+	wait $${FLEX_PID}; \
+	${KILL_MGR} \
+	cp /tmp/log_ucm.txt log_ucm_bt.txt; \
 	${KILL_PERF}
 
 # FlexKV occupies first half of DRAM/NVM, and other app the other half	
@@ -617,7 +694,7 @@ run_eval_dynamic_hw: all
 	pkill kvsbench; \
 	pkill flexkvs;
 
-BG_PREFIXES = "bg_dram_base,bg_znuma_tier,bg_mini_hemem,bg_hemem,bg_test_hemem"
+BG_PREFIXES = "bg_dram_base,bg_znuma_tier,bg_mini_hemem,bg_hemem,bg_test_hemem,bg_nodram_test_hemem"
 BG_APPS = "Isolated,gups,gapbs,bt"
 extract_bg: all
 	python scripts/extract_script.py ${BG_PREFIXES} ${BG_APPS} ${RES}

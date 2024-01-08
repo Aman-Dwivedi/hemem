@@ -62,6 +62,7 @@ struct hemem_process {
   FILE* logfd;
   uint64_t migrate_up_bytes, migrate_down_bytes;
   uint64_t migrations_up, migrations_down;
+  uint64_t migration_waits;
   int64_t dram_delta;
   double ratio;
 #endif
@@ -83,6 +84,7 @@ struct hemem_process {
   struct hemem_page *cur_cool_in_nvm;
   volatile bool need_cool_dram;
   volatile bool need_cool_nvm;
+  uint64_t cools;
 
   volatile ring_handle_t hot_ring;
   volatile ring_handle_t cold_ring;

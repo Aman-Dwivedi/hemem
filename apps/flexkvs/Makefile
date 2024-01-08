@@ -1,22 +1,22 @@
-FLEXKVS_COMMON=hashtable.o ialloc.o jenkins_hash.o settings.o
+FLEXKVS_COMMON=hashtable.o ialloc.o jenkins_hash.o #settings.o
 BENCH_COMMON=rng.o commandline.o workload.o
 
 #TAS_CODE?=/home/tstamler/tas
 #HEMEM_CODE=/home/amanda/hemem/
 
-CFLAGS = -std=gnu99 -g -Wall -Icommon/include -O3 -march=native
+CFLAGS = -std=gnu99 -g -Wall -Icommon/include -O3 -march=native -I./server/
 #CFLAGS += -DDEL_TEST
 LDFLAGS = -pthread -g -O3
 LDLIBS = -lrt -lm -lpthread -lrt -ldl
 
-all: flexkvs kvsbench
+all: kvsbench #flexkvs 
 all-sockets: flexkvs kvsbench
 all-ll: flexkvs-ll
 
-flexkvs: $(addprefix server/,$(FLEXKVS_COMMON) main.o) common/utils.o
+flexkvs: $(addprefix server/,$(FLEXKVS_COMMON) main.o) $(addprefix bench/,$(BENCH_COMMON) main.o) common/utils.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-kvsbench: $(addprefix bench/,$(BENCH_COMMON) main.o) common/utils.o
+kvsbench: $(addprefix server/,$(FLEXKVS_COMMON)) $(addprefix bench/,$(BENCH_COMMON) main.o) common/utils.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 flexkvs-ll: $(addprefix server/,$(FLEXKVS_COMMON) main-ll.o) common/utils.o

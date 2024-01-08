@@ -421,6 +421,7 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
   process->need_cool_dram = false;
   process->need_cool_nvm = false;
   process->migrations_up = process->migrations_down = 0;
+  process->migration_waits = 0;
 
   process->zero = request->zero;
 
@@ -963,6 +964,7 @@ void handle_wp_fault(struct hemem_process *process, uint64_t page_boundry) {
   assert(page != NULL);
 
   migration_waits++;
+  process->migration_waits++;
 
   //LOG("hemem: handle_wp_fault: waiting for migration for page %lx\n",
   //    page_boundry);
