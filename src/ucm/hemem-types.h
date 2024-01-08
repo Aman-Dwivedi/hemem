@@ -50,6 +50,9 @@ struct hemem_process {
   bool exited;
   bool valid_uffd;
   int remap_fd;
+
+  bool zero;
+
 #ifdef HEMEM_QOS
   _Atomic uint64_t volatile accessed_pages[NPBUFTYPES];
   _Atomic uint64_t volatile wrong_memtype;

@@ -42,9 +42,6 @@ pthread_mutex_t channel_lock;
 int request_fd;
 int remap_fd;
 
-void *dram_devdax_mmap;
-void *nvm_devdax_mmap;
-
 double target_miss_ratio =  0.1;
 
 uint64_t required_dram = DRAMSIZE;
@@ -159,6 +156,11 @@ int add_process()
   request.target_miss_ratio = target_miss_ratio;
   request.req_dram = required_dram;
   request.header.msg_size = sizeof(request);
+#ifdef LLAMA
+  request.zero = true;
+#else
+  request.zero = false;
+#endif
 
   response = process_request(request_fd, &request);
   status = response->header.status;  
@@ -264,6 +266,7 @@ void *handle_remap()
   struct msg_header* header;
   int num_pages;
 
+  internal_call = true;
 #if 0
   cpu_set_t cpuset;
   pthread_t thread;
@@ -314,6 +317,7 @@ void *handle_remap()
       assert(0);
     }
   }
+  internal_call = false;
 }
 
 void hemem_app_init()
@@ -362,20 +366,6 @@ void hemem_app_init()
   uffdio_api.ioctls = 0;
   if (ioctl(uffd, UFFDIO_API, &uffdio_api) == -1) {
     perror("ioctl uffdio_api");
-    assert(0);
-  }
-
-#if DRAMSIZE != 0
-  dram_devdax_mmap =libc_mmap(NULL, DRAMSIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, dramfd, 0);
-  if (dram_devdax_mmap == MAP_FAILED) {
-    perror("dram devdax mmap");
-    assert(0);
-  }
-#endif
-
-  nvm_devdax_mmap =libc_mmap(NULL, NVMSIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, nvmfd, 0);
-  if (nvm_devdax_mmap == MAP_FAILED) {
-    perror("nvm devdax mmap");
     assert(0);
   }
 
@@ -557,6 +547,10 @@ void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
     flags &= ~MAP_HUGETLB;
     LOG("hemem_mmap: unset MAP_HUGETLB\n");
   }
+
+  if (addr != NULL) {
+    flags |= MAP_FIXED;
+  }
   
   // reserve block of memory
   length = PAGE_ROUND_UP(length);
@@ -565,7 +559,10 @@ void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
     perror("mmap");
   }
   assert(p != NULL && p != MAP_FAILED);
-
+  if (addr != NULL) {
+    assert(p == addr);
+  }
+  
   // register with uffd
   struct uffdio_register uffdio_register;
   uffdio_register.range.start = (uint64_t)p;

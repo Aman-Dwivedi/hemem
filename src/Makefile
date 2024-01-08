@@ -22,7 +22,10 @@ HEMEM_LIBS = $(LIBS) -ldl -lsyscall_intercept
 
 default: all
 all:app central-manager lib-mmap-populate tmts-manager
-app: libhemem.so
+app: libhemem.so libhemem-llama.so
+
+libhemem-llama.so: hemem-app-llama.o interpose-llama.o channel-shared-app.o channel-app.o logging-app.o
+	$(CC) $(LDFLAGS) -o libhemem-llama.so hemem-app-llama.o interpose-llama.o channel-shared-app.o channel-app.o logging-app.o  $(HEMEM_LIBS)
 
 libhemem.so: hemem-app.o  interpose.o channel-shared-app.o channel-app.o logging-app.o
 	$(CC) $(LDFLAGS) -o libhemem.so hemem-app.o interpose.o channel-shared-app.o channel-app.o logging-app.o  $(HEMEM_LIBS)
@@ -30,8 +33,14 @@ libhemem.so: hemem-app.o  interpose.o channel-shared-app.o channel-app.o logging
 hemem-app.o: ${APP}/hemem-app.c ${APP}/hemem-app.h
 	$(CC) $(APP_CFLAGS) $(APP_INCLUDES) -D ALLOC_HEMEM -c ${APP}/hemem-app.c -o hemem-app.o
 
+hemem-app-llama.o: ${APP}/hemem-app.c ${APP}/hemem-app.h
+	$(CC) $(APP_CFLAGS) $(APP_INCLUDES) -D LLAMA -D ALLOC_HEMEM -c ${APP}/hemem-app.c -o hemem-app-llama.o
+
 interpose.o: ${APP}/interpose.c ${APP}/interpose.h
 	$(CC) $(APP_CFLAGS) $(APP_INCLUDES) -c ${APP}/interpose.c
+
+interpose-llama.o: ${APP}/interpose.c ${APP}/interpose.h
+	$(CC) $(APP_CFLAGS) $(APP_INCLUDES) -D LLAMA  -o interpose-llama.o -c ${APP}/interpose.c
 
 channel-app.o: ${APP}/channel-app.c ${APP}/channel-app.h
 	$(CC) $(APP_CFLAGS) $(APP_INCLUDES) -c ${APP}/channel-app.c

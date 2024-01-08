@@ -1380,7 +1380,7 @@ void *pebs_policy_thread()
   uint64_t migrate_share;
   uint64_t delta_need;
   uint64_t delta_take;
-  double max_ratio = 10.0;
+  double max_ratio = 100.0;
   double memshare_need;
   double memshare_take;
 #endif

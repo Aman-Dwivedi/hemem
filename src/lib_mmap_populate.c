@@ -19,6 +19,8 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
 {
   void *p;
 
+  fprintf(stderr, "mmap called with length %d\n ", length);
+
   if ((flags & MAP_ANONYMOUS) != MAP_ANONYMOUS) {
     return 1;
   }
@@ -26,11 +28,11 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
   if ((flags & MAP_STACK) == MAP_STACK) {
     return 1;
   }
-
+/*
   if (length < 1UL * 1024UL * 1024UL * 1024UL) {
     return 1;
   }
-  
+*/
   if ((flags & MAP_PRIVATE) == MAP_PRIVATE) {
     flags &= ~MAP_PRIVATE;
     flags |= MAP_SHARED;
