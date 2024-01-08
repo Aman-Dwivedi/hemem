@@ -1,6 +1,6 @@
 #!/bin/bash
 
-while [[ $( grep "Initialization" $1 ) -eq "" ]]
+while [[ $( grep -o "Initialization" $1 ) == "" ]]
 do
         sleep 1
         #echo "Waiting for graph setup"

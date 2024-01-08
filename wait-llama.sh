@@ -1,6 +1,6 @@
 #!/bin/bash
 
-while [[ $( grep "The key to happiness in one short sentence is:" $1 ) -eq "" ]]
+while [[ $( grep "The key to happiness in one short sentence is:" $1 ) == "" ]]
 do
         sleep 1
         #echo "Waiting for graph setup"
