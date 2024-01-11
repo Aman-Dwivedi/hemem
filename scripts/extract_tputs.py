@@ -15,6 +15,6 @@ matches = tput_pattern.findall(infile)
 for match in matches:
     match = re.compile(r"[0-9]+\.[0-9]+").search(match)
     if match:
-        tput = np.float64(match.group(0)) * 1000
+        tput = np.float64(match.group(0)) #* 1000
         outfile.write(str(tput) + "\n")
 

@@ -276,10 +276,19 @@ static void *do_gups(void *arguments)
   return 0;
 }
 
+bool wait_for_signal = false;
+bool old_received_signal = false;
+
 void signal_handler() 
 {
-  received_signal = true;
-  hotsize += (hotsize / 2);
+  if (wait_for_signal && !received_signal) {
+    received_signal = true;
+    return;
+  }
+  
+  if (!wait_for_signal || (wait_for_signal && received_signal)) {
+    hotsize += (hotsize / 2);
+  }
 }
 
 void kill_gups()
@@ -300,7 +309,6 @@ int main(int argc, char **argv)
   struct gups_args** ga;
   pthread_t t[MAX_THREADS];
   char *log_filename;
-  bool wait_for_signal = false;
   char *start_cpu_str;
 
   // Stop waiting on receiving signal
@@ -444,13 +452,13 @@ int main(int argc, char **argv)
   filename = "indices2.txt";
 
   memset(thread_gups, 0, sizeof(thread_gups));
-  /*
+  
   if(wait_for_signal) {
     fprintf(stderr, "Waiting for signal\n");
     while(!received_signal);
     fprintf(stderr, "Received signal\n");
   }
-  */
+
   pthread_t print_thread;
   int pt = pthread_create(&print_thread, NULL, print_instantaneous_gups, log_filename);
   assert(pt == 0);

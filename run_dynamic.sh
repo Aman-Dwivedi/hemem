@@ -12,9 +12,9 @@ rm -f $debugfile
 run_perf_pid=$!
 
 FLEXKV_SIZE=$((320*1024*1024*1024))
-RUNTIME=500
-WARMUP=100
-DYNTIME=400
+RUNTIME=600
+WARMUP=200
+DYNTIME=500
 HOTFRAC1=0.15
 HOTFRAC2=0.30
 
@@ -25,19 +25,20 @@ nice -20 numactl -N0 -m0 --physcpubind=19-23 -- env MISS_RATIO=1.0 LD_PRELOAD=/h
 llama_pid=$!
 perf stat -e instructions -I 1000 -p ${llama_pid} -o data/dynamic/perf/llama-ipc.txt &
 ./wait-llama.sh data/dynamic/perf/llama.txt
-nice -20 numactl -N0 -m0 --physcpubind=14-18 -- env OMP_THREAD_LIMIT=4 REQ_DRAM=0 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./apps/nas-bt-c-benchmark/NPB-OMP/bin/bt.E > data/dynamic/perf/bt.txt 2>&1 &
-bt_pid=$!
-perf stat -e instructions -I 1000 -p ${bt_pid} -o data/dynamic/perf/bt-ipc.txt &
-./wait-bt.sh data/dynamic/perf/bt.txt
+nice -20 numactl -N0 -m0 --physcpubind=14-18 -- env START_CPU=14 REQ_DRAM=0 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./microbenchmarks/gups-pebs 4 0 37 8 36 1 data/dynamic/perf/gups.txt > data/dynamic/perf/gups-setup.txt 2>&1 &
+gups_pid=$!
+perf stat -e instructions -I 1000 -p ${gups_pid} -o data/dynamic/perf/gups-ipc.txt &
+./wait-gups.sh data/dynamic/perf/gups-setup.txt
 nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} -D ${DYNTIME} -H ${HOTFRAC2} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > data/dynamic/perf/flexkvs.txt &
 flexkvs_pid=$!
 ./wait-kvsbench.sh data/dynamic/perf/flexkvs.txt
-sleep 200
-echo ${bt_pid}:0.5 > /tmp/miss_ratio_update
+sleep 300
+echo ${gups_pid}:0.5 > /tmp/miss_ratio_update
 kill -s USR2 ${central_pid}
-kill -s USR1 ${bt_pid}
+kill -s USR1 ${gups_pid}
 wait ${flexkvs_pid}
-kill -9 ${bt_pid}
+#kill -9 ${gups_pid}
+kill -s USR2 ${gups_pid}
 kill -9 ${llama_pid}
 kill -9 ${central_pid}
 
@@ -46,5 +47,5 @@ pkill perf
 
 
 cp /tmp/log-$flexkvs_pid.txt data/dynamic/logs/flexkvs-log.txt
-cp /tmp/log-$bt_pid.txt data/dynamic/logs/bt-log.txt
+cp /tmp/log-$gups_pid.txt data/dynamic/logs/gups-log.txt
 cp /tmp/log-$llama_pid.txt data/dynamic/logs/llama-log.txt
