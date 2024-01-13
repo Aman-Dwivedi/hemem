@@ -70,8 +70,8 @@
 #   define STATS_ADD(c, f, n) do { } while (0)
 #endif
 
-#define HIST_START_US 0
-#define HIST_BUCKET_US 1
+#define HIST_START_NS 0
+#define HIST_BUCKET_NS 10
 #define HIST_BUCKETS 4096
 #define BUFSIZE 1000000
 
@@ -92,7 +92,7 @@ enum benchmark_phase {
 };
 
 struct settings settings;
-static struct workload workload;
+static struct workload workload1;
 static struct workload workload2;
 static volatile enum benchmark_phase phase;
 static volatile uint16_t init_count = 0;
@@ -155,7 +155,7 @@ static inline uint64_t get_nanos(void)
 
 static inline void record_latency(struct core *c, uint64_t nanos)
 {
-    size_t bucket = ((nanos / 1000) - HIST_START_US) / HIST_BUCKET_US;
+    size_t bucket = (nanos - HIST_START_NS) / HIST_BUCKET_NS;
     if (bucket >= HIST_BUCKETS) {
         bucket = HIST_BUCKETS - 1;
     }
@@ -667,10 +667,10 @@ static void load_keys(struct core *c, struct item_allocator *ia)
 
     i = cn;
     //pending = 0;
-    while (i < workload.keys_num) {
+    while (i < workload1.keys_num) {
         // send out new request 
-        //printf("[%d:%p] i=%zu  keys_num=%zu\n", cn, co, i, workload.keys_num);
-        k = &workload.keys[i];
+        //printf("[%d:%p] i=%zu  keys_num=%zu\n", cn, co, i, workload1.keys_num);
+        k = &workload1.keys[i];
         set_request(c, &c->conns[0], k, 0, ia);
         i += settings.threads;
     }
@@ -699,7 +699,7 @@ static void load_other_keys(struct core *c)
 
     i = j = cn;
     pending = 0;
-    while (i < workload.keys_num || j < workload2.keys_num || pending > 0) {
+    while (i < workload1.keys_num || j < workload2.keys_num || pending > 0) {
         if ((ret = ss_epoll_wait(c->sc, c->ep, evs, 8, -1)) < 0) {
             fprintf(stderr, "[%d] load_keys epoll_wait failed\n", cn);
             abort();
@@ -736,12 +736,12 @@ static void load_other_keys(struct core *c)
                     printf("[%d:%p] i=%zu j=%zu  keys_num=%zu\n", cn, co, i, j, workload2.keys_num);
                     rng = (rand() % 10) + 1;
 	
-		    if(i == workload.keys_num) rng = 10;
+		    if(i == workload1.keys_num) rng = 10;
 
 		    if(j == workload2.keys_num) rng = 1;
 
 	  	    if(rng < 10*(1-DEL_RATIO))	    
-		    	k = &workload.keys[i];
+		    	k = &workload1.keys[i];
 		    else
 			k = &workload2.keys[j];
 
@@ -760,7 +760,7 @@ static void load_other_keys(struct core *c)
                     co->pending++;
                 } else if (co->tx_len == 0) {
                     // no more keys to initialize -> poll for RX 
-		    //printf("no more keys, i=%d, workload=%d, pending=%d\n", i, workload2.key_num, pending);
+		    //printf("no more keys, i=%d, workload1=%d, pending=%d\n", i, workload2.key_num, pending);
                     conn_epupdate(c, co, 0);
                 } else {
                     if (conn_send(c, co) == 0) {
@@ -932,7 +932,7 @@ static inline void send_pending(struct core *c, struct item_allocator *ia)
 
     // pick a key and operation 
     if(phase != BENCHMARK_DYN_HOTSET)
-        workload_op(&workload, &c->wlc, &k, &op);
+        workload_op(&workload1, &c->wlc, &k, &op);
     else
         workload_op(&workload2, &c->wlc, &k, &op);
 
@@ -1044,7 +1044,7 @@ static inline int hist_value(size_t i)
         return -1;
     }
 
-    return i * HIST_BUCKET_US + HIST_START_US;
+    return i * HIST_BUCKET_NS + HIST_START_NS;
 }
 
 int main(int argc, char *argv[])
@@ -1074,11 +1074,13 @@ int main(int argc, char *argv[])
     num_threads = settings.threads;
     skip_load = settings.skip_load;
 
-    // initialize workload 
-    workload_init(&workload);
+    printf("Running for %d seconds\n", settings.run_time);
+
+    // initialize workload 1
+    workload_init(&workload1);
 
     if(settings.dyn_hotset_time)
-        workload_init_dyn(&workload, &workload2);
+        workload_init_dyn(&workload1, &workload2);
 
     printf("initiating hash table\n");
     hasht_init(settings.hasht_size);
@@ -1088,7 +1090,7 @@ int main(int argc, char *argv[])
     //iallocs = calloc(num_threads, sizeof(*iallocs));
 
 #ifdef DEL_TEST
-    workload_adjust(&workload, &workload2);
+    workload_adjust(&workload1, &workload2);
 #endif
 
 #ifdef USE_MTCP
@@ -1117,7 +1119,7 @@ int main(int argc, char *argv[])
 
     for (i = 0; i < num_threads; i++) {
         cs[i].id = i;
-        workload_core_init(&workload, &cs[i].wlc);
+        workload_core_init(&workload1, &cs[i].wlc);
         if (pthread_create(&cs[i].pthread, NULL, thread_run, cs + i)) {
             fprintf(stderr, "pthread_create failed\n");
             return EXIT_FAILURE;
@@ -1179,8 +1181,9 @@ int main(int argc, char *argv[])
                 sizeof(fracs) / sizeof(fracs[0]));
 
 
-        printf("TP: total=%'.4Lf mops  50p=%d us  90p=%d us  95p=%d us  "
+        printf("seconds=%ld TP: total=%'.4Lf mops  50p=%d us  90p=%d us  95p=%d us  "
                 "99p=%d us  99.9p=%d us  99.99p=%d us  \n",
+                current_runtime,
                 tp_total / 1000000.,
                 hist_value(fracs_pos[0]), hist_value(fracs_pos[1]),
                 hist_value(fracs_pos[2]), hist_value(fracs_pos[3]),
@@ -1201,9 +1204,10 @@ int main(int argc, char *argv[])
         (double)(get_nanos() - t_start - warmup_time * 1000000000UL));
     for(i = 0; i < HIST_BUCKETS; ++i)
         if(glbl_hist[i] != 0)
-            printf("Hist[%d]=%d\n", i, glbl_hist[i]);
+            printf("Hist[%d]=%d\n", i*HIST_BUCKET_NS, glbl_hist[i]);
 
 #ifdef USE_MTCP
     mtcp_destroy();
 #endif
 }
+
