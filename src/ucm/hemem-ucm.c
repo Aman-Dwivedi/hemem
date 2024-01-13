@@ -378,7 +378,7 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
   struct hemem_process* process;
   uint64_t** buffer;
   int ret;
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
   char logpath[32];
 #endif
 
@@ -390,7 +390,7 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
 
   process->pid = request->header.pid;
   process->exited = false;
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
   process->target_miss_ratio = request->target_miss_ratio;
 #endif
   process->valid_uffd = false;
@@ -427,7 +427,7 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
 
   process->max_dram = request->req_dram;
 
-#ifdef HEMEM_QOS  
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
   snprintf(&logpath[0], sizeof(logpath) - 1, "/tmp/log-%d.txt", process->pid);
   process->logfd = fopen(logpath, "w");
   if (process->logfd == NULL) {

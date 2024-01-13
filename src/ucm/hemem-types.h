@@ -1,7 +1,8 @@
 #ifndef HEMEM_TYPES_H
 #define HEMEM_TYPES_H
 
-#define HEMEM_QOS
+//#define HEMEM_QOS
+//#define FAIR_SHARE
 
 enum pbuftype {
     DRAMREAD = 0,
@@ -56,7 +57,7 @@ struct hemem_process {
 
   bool zero;
 
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
   _Atomic uint64_t volatile accessed_pages[NPBUFTYPES];
   _Atomic uint64_t volatile wrong_memtype;
   _Atomic uint64_t volatile samples[24];
@@ -67,6 +68,7 @@ struct hemem_process {
   uint64_t migrations_up, migrations_down;
   uint64_t migration_waits;
   int64_t dram_delta;
+  bool still_migrating;
   double ratio;
 #endif
   volatile uint64_t mem_allocated;

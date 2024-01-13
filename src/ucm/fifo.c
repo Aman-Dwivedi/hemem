@@ -102,7 +102,7 @@ struct hemem_page* prev_page(struct page_list *list, struct hemem_page *page)
   return next_page;
 }
 
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
 void enqueue_process(struct process_list *queue, struct hemem_process *entry)
 {
   struct hemem_process *current, *prev, *old_prev;
@@ -204,7 +204,7 @@ void enqueue_process(struct process_list *queue, struct hemem_process *entry)
 }
 #endif
 
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
 void process_list_remove(struct process_list *list, struct hemem_process *process)
 {
   struct hemem_process *tmp, *next, *prev, *current, *old_prev;

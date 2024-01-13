@@ -179,7 +179,7 @@ void *pebs_scan_thread()
                 page = find_page(process, pfn);
                 if (page != NULL) {
                   if (page->va != 0) {
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
                     process->accessed_pages[j]++;
 #endif
                     page->accesses[j]++;
@@ -919,7 +919,7 @@ void process_migrate_up(struct hemem_process *process, uint64_t migrate_up_bytes
   //LOG("%f\tprocess %d has migrated %ld bytes up\n", elapsed(&startup, &now), process->pid, migrated_bytes);
 }
 
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
 static inline double calc_miss_ratio(struct hemem_process *process)
 {
   return ((1.0 * process->accessed_pages[NVMREAD]) / (1.0 * (process->accessed_pages[DRAMREAD] + process->accessed_pages[NVMREAD])));
@@ -1084,7 +1084,7 @@ void *pebs_policy_thread()
   double migrate_time;
   struct hemem_process *process, *tmp;
   struct timeval now;
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
   //uint64_t requested_dram, remaining_dram, dram_taking, dram_portion;
   //double slack;
   int64_t tmp_dram[NUM_HOTNESS_LEVELS];
@@ -1095,6 +1095,8 @@ void *pebs_policy_thread()
   struct hemem_process *take_fastmem[MAX_PROCESSES];
   int num_need_memory;
   int num_take_memory;
+  int down_migrations_left = 0;
+  int up_migrations_left = 0;
   uint64_t interprocess_migrate = PEBS_MIGRATE_RATE / 2;
   uint64_t intraprocess_migrate = PEBS_MIGRATE_RATE / 2;
   uint64_t migrate_share;
@@ -1103,6 +1105,7 @@ void *pebs_policy_thread()
   double max_ratio = 100.0;
   double memshare_need;
   double memshare_take;
+  uint64_t memshare_proc;
 #endif
 
   thread = pthread_self();
@@ -1398,7 +1401,229 @@ void *pebs_policy_thread()
       process = process->next;
       pthread_mutex_unlock(&(tmp->process_lock));
     }
+#elif defined(FAIR_SHARE)
+    num_need_memory = 0;
+    num_take_memory = 0;
+    memshare_proc = 0;
+    memshare_need = 0;
+    memshare_take = 0;
+    delta_need = 0;
+    delta_take = 0;
 
+    process = peek_process(&processes_list);
+    while(process != NULL) {
+      pthread_mutex_lock(&(process->process_lock));
+      handle_ring_requests(process);
+
+      if (process->accessed_pages[DRAMREAD] + process->accessed_pages[NVMREAD] != 0) {
+        if (process->current_miss_ratio == -1) {
+          // first time we have actual data to compute, but don't want to include the -1.0 values in the EWMA, so
+          // just comute a raw miss ratio here
+          process->current_miss_ratio = calc_miss_ratio(process);
+        } else {
+          process->current_miss_ratio = (EWMA_FRAC * calc_miss_ratio(process)) + ((1 - EWMA_FRAC) * process->current_miss_ratio);
+        }
+        process->accessed_pages[DRAMREAD] = 0; process->accessed_pages[NVMREAD] = 0;
+      } else {
+        // we use a negative current miss ratio to signal that we don't have
+        // any access information for this process yet, so rest of policy thread
+        // shouldn't try to manage it for now 
+        process->current_miss_ratio = 0;
+      }
+
+      for (int xxx = LAST_HEMEM_THREAD + 1; xxx < PEBS_NPROCS; xxx++) {
+	      process->samples[xxx] = 0;
+	    }
+
+      process->ratio = process->current_miss_ratio / process->target_miss_ratio;
+
+      if(process->ratio > 1.05) {
+        // not meeting target, do we have hot NVM pages? If no, it needs more DRAM
+        //if ((count_hottest_nvm_bins(process) > count_coldest_dram_bins(process))) {
+        // not meeting target and have more hot NVM pages than cold DRAM pages; give more dram
+        need_fastmem[num_need_memory] = process;
+        num_need_memory++;
+        process->ratio = process->ratio;
+        if (process->ratio > max_ratio) {
+          // clip ratio to some maximum, here the interprocess migrate rate
+          // TODO: Is this the right thing to do? The ratio could potentially
+          // be infinite
+          process->ratio = max_ratio;
+        }
+        memshare_need += process->ratio;
+        memshare_proc += process->current_dram;
+
+      } else if(process->ratio < 0.95) {
+        // below target, can take dram
+        take_fastmem[num_take_memory] = process;
+        num_take_memory++;
+        process->ratio = ((process->target_miss_ratio / process->current_miss_ratio));
+        if (process->ratio > max_ratio) {
+          // clip ratio to some maximum, here the interprocess migrate rate
+          // TODO: Is this the right thing to do? The ratio could be infinite
+          // particularly if the current miss ratio is 0
+          process->ratio = max_ratio;
+        }
+        memshare_take += process->ratio;
+        memshare_proc += process->current_dram;
+      }
+
+      tmp = process;
+      process = process->next;
+      pthread_mutex_unlock(&(tmp->process_lock)); 
+    }
+
+    // give share of migration bandwidth to processes that need more dram
+    if(num_need_memory > 0) {
+      delta_need = num_need_memory * FAIR_SHARE_DRAM;
+      // Check if dram is available to provide
+      if(((DRAMSIZE - memshare_proc) > delta_need) && (down_migrations_left == 0)) {
+        for(i = 0; i < num_need_memory; i++) {
+          process = need_fastmem[i];
+          pthread_mutex_lock(&(process->process_lock));
+          handle_ring_requests(process);
+
+          // TODO : Can try giving everyone an equal share of migration bandwidth? 
+	  if(process->dram_delta == 0 && (up_migrations_left == 0)) {
+            process->dram_delta = (process->ratio/memshare_need) * (interprocess_migrate);
+            process->migrate_up_bytes = process->dram_delta > FAIR_SHARE_DRAM ? FAIR_SHARE_DRAM : process->dram_delta;
+            process->dram_delta = FAIR_SHARE_DRAM - process->migrate_up_bytes;
+            process->still_migrating = true;
+          }
+          else {
+            if(process->dram_delta > ((process->ratio/memshare_need) * (interprocess_migrate))) {
+              process->migrate_up_bytes = ((process->ratio/memshare_need) * (interprocess_migrate)); 
+              process->dram_delta -= process->migrate_up_bytes;
+            }
+            else {
+              process->migrate_up_bytes = process->dram_delta;
+              process->dram_delta -= process->migrate_up_bytes;
+            }
+	  }
+
+          if(process->dram_delta == 0 && (process->still_migrating == true)) {
+            up_migrations_left += 1;
+            process->still_migrating = false;
+          }
+
+          if(up_migrations_left == num_need_memory)
+            up_migrations_left = 0;
+          // now migrate ? Migrate = Give?
+          process_migrate_up(process, process->migrate_up_bytes);
+
+          pthread_mutex_unlock(&(process->process_lock));
+	}
+      } else { // free up dram first. TODO : what happens if we still dont have dram after free up?
+        // migrate_down, then migrate_up ?
+        // give share of migration bandwidth to processes that are giving up dram
+        //process = peek_process(&processes_list);
+        //while(process != NULL) {
+	for(i = 0;i < num_take_memory; i++) {
+          process = take_fastmem[i];
+          pthread_mutex_lock(&(process->process_lock));
+
+	  // TODO : Can try giving everyone an equal share of migration bandwidth? 
+	  if(process->dram_delta == 0 && (down_migrations_left == 0)) {
+            process->dram_delta = (process->ratio/(memshare_take)) * (interprocess_migrate);
+            migrate_down_bytes = (process->dram_delta) > (process->current_dram/2) ? (process->current_dram/2) : (-1 * process->dram_delta);
+            process->dram_delta = ((process->current_dram / 2) - migrate_down_bytes);
+            process->still_migrating = true;
+          }
+          else {
+            if((process->dram_delta) > ((process->ratio/(memshare_take)) * (interprocess_migrate))) {
+              migrate_down_bytes = ((process->ratio/(memshare_take)) * (interprocess_migrate)); 
+              process->dram_delta -= migrate_down_bytes;
+            }
+            else {
+              migrate_down_bytes = process->dram_delta;
+              process->dram_delta -= migrate_down_bytes;
+            }
+	  }
+
+          //migrate_down_bytes = migrate_down_bytes > interprocess_migrate ? interprocess_migrate : migrate_down_bytes;
+          if(process->dram_delta == 0 && (process->still_migrating == true)) {
+	    down_migrations_left++;
+	    process->still_migrating = false;
+          }
+
+	  process->migrate_down_bytes = migrate_down_bytes;
+          // Do we keep migrating down until all (process->current_dram/2) is migrated?
+          process_migrate_down(process, process->migrate_down_bytes);
+
+          //tmp = process;
+          //process = process->next;
+          pthread_mutex_unlock(&(tmp->process_lock));
+        }
+
+        if(down_migrations_left == num_take_memory) {
+          down_migrations_left = 0;
+          for(i = 0; i < num_need_memory; i++) {
+            process = need_fastmem[i];
+            pthread_mutex_lock(&(process->process_lock));
+            handle_ring_requests(process);
+
+            // TODO : Can try giving everyone an equal share of migration bandwidth? 
+	    if(process->dram_delta == 0) {
+              process->dram_delta = (process->ratio/memshare_need) * (interprocess_migrate);
+              process->migrate_up_bytes = process->dram_delta > FAIR_SHARE_DRAM ? FAIR_SHARE_DRAM : process->dram_delta;
+              process->dram_delta = FAIR_SHARE_DRAM - process->migrate_up_bytes;
+              process->still_migrating = true;
+            }
+            else {
+              if(process->dram_delta > ((process->ratio/memshare_need) * (interprocess_migrate))) {
+                process->migrate_up_bytes = ((process->ratio/memshare_need) * (interprocess_migrate)); 
+                process->dram_delta -= process->migrate_up_bytes;
+              }
+              else {
+                process->migrate_up_bytes = process->dram_delta;
+                process->dram_delta -= process->migrate_up_bytes;
+              }
+	    }
+
+            if(process->dram_delta == 0 && (process->still_migrating == true)) {
+              up_migrations_left += 1;
+              process->still_migrating = false;
+            }
+
+            if(up_migrations_left == num_need_memory)
+              up_migrations_left = 0;
+            // now migrate ? Migrate = Give?
+            process_migrate_up(process, process->migrate_up_bytes);
+
+            pthread_mutex_unlock(&(process->process_lock));
+	  }
+        }
+      }
+    } /*else if(num_take_memory > 0) {
+      for(i = 0;i<num_take_memory;i++) {
+        process = take_fastmem[i];
+        pthread_mutex_lock(&(process->process_lock));
+        handle_ring_requests(process);
+
+	// TODO : Can try giving everyone an equal share of migration bandwidth? 
+	if(process->dram_delta == 0) {
+          process->dram_delta = (-1) * (process->ratio/memshare_take) * (interprocess_migrate);
+          process->migrate_down_bytes = (-1 * process->dram_delta) > (process->current_dram/2) ? (process->current_dram/2) : (-1 * process->dram_delta);
+          process->dram_delta = (-1) * ((process->current_dram / 2) - process->migrate_down_bytes);
+        }
+        else {
+          if((-1 * process->dram_delta) > ((process->ratio/memshare_take) * (interprocess_migrate))) {
+            process->migrate_down_bytes = ((process->ratio/memshare_take) * (interprocess_migrate)); 
+            process->dram_delta += process->migrate_down_bytes;
+          }
+          else {
+            process->migrate_down_bytes = process->dram_delta;
+            process->dram_delta += process->migrate_down_bytes;
+          }
+	}
+
+        if(process->dram_delta == 0) {
+	  down_migrations_left++;
+        }
+        // Do we keep migrating down until all (process->current_dram/2) is migrated?
+        process_migrate_down(process, migrate_down_bytes);
+      }
+    }*/
 #else
     process = peek_process(&processes_list);
     while (process != NULL) {
@@ -1535,7 +1760,7 @@ void pebs_update_process(struct hemem_process *process, double new_miss_ratio)
 
 void pebs_add_process(struct hemem_process *process)
 {
-#ifdef HEMEM_QOS
+#if defined(HEMEM_QOS) || defined(FAIR_SHARE)
   // new process gets to start with the amount of allowed dram
   // equal to the amount of cold dram the processes of lower
   // priority are using
@@ -1544,6 +1769,8 @@ void pebs_add_process(struct hemem_process *process)
   process->current_miss_ratio = -1;
   process->current_nvm = 0;
   process->current_dram = 0;
+  process->dram_delta = 0;
+  process->still_migrating = false;
   pthread_mutex_unlock(&(process->process_lock));
 #else
   // reallocate DRAM among all current processes
@@ -1684,7 +1911,22 @@ void count_pages()
   process = processes_list.first;
   while (process != NULL) {
     //pthread_mutex_lock(&(process->process_lock));
-#ifdef HEMEM_QOS
+#if defined(FAIR_SHARE)
+    fprintf(process->logfd, "%ld\t%f\t%lu\t%lu", rdtscp(), process->current_miss_ratio, process->current_dram, process->current_nvm);
+    //fprintf(process->logfd, "%ld\t%f\t%lu\t%lu", rdtscp(), calc_miss_ratio(process), process->current_dram, process->current_nvm);
+    fprintf(process->logfd, "\tdram_lists: [%lu", process->dram_lists[COLD].numentries);
+    for (i = 1; i < NUM_HOTNESS_LEVELS; i++) {
+      fprintf(process->logfd, ", %lu", process->dram_lists[i].numentries);
+    }
+    fprintf(process->logfd, "]");
+    fprintf(process->logfd, "\tnvm_lists: [%lu", process->nvm_lists[COLD].numentries);
+    for (i = 1; i < NUM_HOTNESS_LEVELS; i++) {
+      fprintf(process->logfd, ", %lu", process->nvm_lists[i].numentries);
+    }
+    fprintf(process->logfd, "]\tmigrations_up: %lu\tmigrations_down: %lu\tmigration_waits: %lu\tDRAM_samples: %lu\tNVM_samples: %lu\tcools: %lu\n", process->migrations_up, process->migrations_down, process->migration_waits, process->accessed_pages[DRAMREAD], process->accessed_pages[NVMREAD], process->cools);
+
+    fflush(process->logfd);
+#elif defined(HEMEM_QOS)
     fprintf(process->logfd, "%ld\t%f\t%lu\t%lu", rdtscp(), process->current_miss_ratio, process->current_dram, process->current_nvm);
     //fprintf(process->logfd, "%ld\t%f\t%lu\t%lu", rdtscp(), calc_miss_ratio(process), process->current_dram, process->current_nvm);
     fprintf(process->logfd, "\tdram_lists: [%lu", process->dram_lists[COLD].numentries);

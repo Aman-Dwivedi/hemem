@@ -21,7 +21,7 @@ LIBS = -lm -lpthread
 HEMEM_LIBS = $(LIBS) -ldl -lsyscall_intercept
 
 default: all
-all:app central-manager lib-mmap-populate
+all:app central-manager central-manager-fair lib-mmap-populate
 app: libhemem.so libhemem-llama.so
 
 libhemem-llama.so: hemem-app-llama.o interpose-llama.o channel-shared-app.o channel-app.o logging-app.o
@@ -48,11 +48,17 @@ channel-app.o: ${APP}/channel-app.c ${APP}/channel-app.h
 central-manager: ucm.o channel-shared.o channel-ucm.o timer.o hemem-ucm.o pebs.o fifo.o spsc-ring.o logging.o
 	$(CC) -o central-manager ucm.o channel-shared.o channel-ucm.o timer.o pebs.o hemem-ucm.o fifo.o spsc-ring.o logging.o -lpthread
 
+central-manager-fair: ucm.o channel-shared.o channel-ucm.o timer.o pebs-fair.o hemem-ucm-fair.o fifo-fair.o spsc-ring.o logging.o
+	$(CC) -o central-manager-fair ucm.o channel-shared.o channel-ucm.o timer.o pebs-fair.o hemem-ucm-fair.o fifo.o spsc-ring.o logging.o -lpthread
+
 ucm.o: ${UCM}/ucm.c
 	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/ucm.c
 
 hemem-ucm.o: ${UCM}/hemem-ucm.c ${UCM}/hemem-ucm.h ${UCM}/hemem-types.h
-	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/hemem-ucm.c -lpthread
+	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -D HEMEM_QOS -c ${UCM}/hemem-ucm.c -lpthread -o hemem-ucm.o
+
+hemem-ucm-fair.o: ${UCM}/hemem-ucm.c ${UCM}/hemem-ucm.h ${UCM}/hemem-types.h
+	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -D FAIR_SHARE -c ${UCM}/hemem-ucm.c -lpthread -o hemem-ucm-fair.o
 
 channel-shared-app.o: ${SHARED}/channel-shared.c ${SHARED}/channel-shared.h
 	$(CC) $(APP_CFLAGS) $(SHARED_INCLUDES) -o channel-shared-app.o  -c ${SHARED}/channel-shared.c
@@ -67,10 +73,17 @@ timer.o: ${UCM}/timer.c ${UCM}/timer.h
 	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/timer.c
 
 pebs.o: ${UCM}/pebs.c ${UCM}/pebs.h ${UCM}/hemem-types.h
-	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/pebs.c -lpthread
+	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -D HEMEM_QOS -c ${UCM}/pebs.c -lpthread -o pebs.o
+
+pebs-fair.o: ${UCM}/pebs.c ${UCM}/pebs.h ${UCM}/hemem-types.h
+	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -D FAIR_SHARE -c ${UCM}/pebs.c -lpthread -o pebs-fair.o
 
 fifo.o: ${UCM}/fifo.c ${UCM}/fifo.h
-	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/fifo.c
+	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -D HEMEM_QOS -c ${UCM}/fifo.c
+
+fifo-fair.o: ${UCM}/fifo.c ${UCM}/fifo.h
+	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -D FAIR_SHARE -c ${UCM}/fifo.c
+
 
 spsc-ring.o: ${UCM}/spsc-ring.c ${UCM}/spsc-ring.h
 	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/spsc-ring.c
@@ -85,4 +98,4 @@ lib-mmap-populate: lib_mmap_populate.c
 	$(CC) lib_mmap_populate.c -lsyscall_intercept -fpic -shared -o libmmap_populate.so
 
 clean:
-	$(RM) *.o *.so central-manager
+	$(RM) *.o *.so central-manager-*

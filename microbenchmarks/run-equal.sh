@@ -14,16 +14,16 @@ run_perf_pid=$!
 nice -20 numactl -C0,1,2,3 -m0 -- ./../src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 15
-nice -20 numactl -C4,5,6,7 -m0   -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-first.txt &
+nice -20 numactl -C4,5,6,7 -m0   -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/yojan/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-first.txt &
 gups1_pid=$!
 sleep 30
-nice -20 numactl -C8,9,10,11 -m0 -- env START_CPU=8 MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-second.txt &
+nice -20 numactl -C8,9,10,11 -m0 -- env START_CPU=8 MISS_RATIO=0.1 LD_PRELOAD=/home/yojan/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-second.txt &
 gups2_pid=$!
 sleep 30
-nice -20 numactl -C12,13,14,15 -m0 -- env START_CPU=12 MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-third.txt &
+nice -20 numactl -C12,13,14,15 -m0 -- env START_CPU=12 MISS_RATIO=0.1 LD_PRELOAD=/home/yojan/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-third.txt &
 gups3_pid=$!
 sleep 30
-nice -20 numactl -C16,17,18,19 -m0 -- env START_CPU=16 MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-fourth.txt &
+nice -20 numactl -C16,17,18,19 -m0 -- env START_CPU=16 MISS_RATIO=0.1 LD_PRELOAD=/home/yojan/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-fourth.txt &
 gups4_pid=$!
 sleep 200
 
