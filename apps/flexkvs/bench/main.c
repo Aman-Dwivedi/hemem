@@ -70,8 +70,8 @@
 #   define STATS_ADD(c, f, n) do { } while (0)
 #endif
 
-#define HIST_START_US 0
-#define HIST_BUCKET_US 1
+#define HIST_START_NS 0
+#define HIST_BUCKET_NS 10
 #define HIST_BUCKETS 4096
 #define BUFSIZE 1000000
 
@@ -155,7 +155,7 @@ static inline uint64_t get_nanos(void)
 
 static inline void record_latency(struct core *c, uint64_t nanos)
 {
-    size_t bucket = ((nanos / 1000) - HIST_START_US) / HIST_BUCKET_US;
+    size_t bucket = (nanos - HIST_START_NS) / HIST_BUCKET_NS;
     if (bucket >= HIST_BUCKETS) {
         bucket = HIST_BUCKETS - 1;
     }
@@ -1044,7 +1044,7 @@ static inline int hist_value(size_t i)
         return -1;
     }
 
-    return i * HIST_BUCKET_US + HIST_START_US;
+    return i * HIST_BUCKET_NS + HIST_START_NS;
 }
 
 int main(int argc, char *argv[])
@@ -1204,7 +1204,7 @@ int main(int argc, char *argv[])
         (double)(get_nanos() - t_start - warmup_time * 1000000000UL));
     for(i = 0; i < HIST_BUCKETS; ++i)
         if(glbl_hist[i] != 0)
-            printf("Hist[%d]=%d\n", i, glbl_hist[i]);
+            printf("Hist[%d]=%d\n", i*HIST_BUCKET_NS, glbl_hist[i]);
 
 #ifdef USE_MTCP
     mtcp_destroy();
