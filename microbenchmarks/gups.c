@@ -142,8 +142,7 @@ static void *print_instantaneous_gups(void *arg)
   int hx;
   uint64_t msg_total;
   uint64_t current_runtime = 0;
-  uint64_t warmup_runtime = 0;
-
+  uint64_t warmup_runtime = 100;
   fprintf(stderr, "Opening instantaneous gups at %s\n", log_filename);
   fflush(stderr);
   tot = fopen(log_filename, "w");
@@ -189,8 +188,8 @@ static void *print_instantaneous_gups(void *arg)
     //fflush(stdout);
     memset(hist, 0, sizeof(*hist) * HIST_BUCKETS);
 
-    ++current_runtime;
 
+    ++current_runtime;
     sleep(1);
   }
 
@@ -277,10 +276,19 @@ static void *do_gups(void *arguments)
   return 0;
 }
 
+bool wait_for_signal = false;
+bool old_received_signal = false;
+
 void signal_handler() 
 {
-  received_signal = true;
-  hotsize += (hotsize / 2);
+  if (wait_for_signal && !received_signal) {
+    received_signal = true;
+    return;
+  }
+  
+  if (!wait_for_signal || (wait_for_signal && received_signal)) {
+    hotsize += (hotsize / 2);
+  }
 }
 
 void kill_gups()
@@ -301,7 +309,6 @@ int main(int argc, char **argv)
   struct gups_args** ga;
   pthread_t t[MAX_THREADS];
   char *log_filename;
-  bool wait_for_signal = false;
   char *start_cpu_str;
 
   // Stop waiting on receiving signal
@@ -445,13 +452,13 @@ int main(int argc, char **argv)
   filename = "indices2.txt";
 
   memset(thread_gups, 0, sizeof(thread_gups));
-  /*
+  
   if(wait_for_signal) {
     fprintf(stderr, "Waiting for signal\n");
     while(!received_signal);
     fprintf(stderr, "Received signal\n");
   }
-  */
+
   pthread_t print_thread;
   int pt = pthread_create(&print_thread, NULL, print_instantaneous_gups, log_filename);
   assert(pt == 0);
@@ -486,7 +493,7 @@ int main(int argc, char **argv)
 
   for(i = 0; i < HIST_BUCKETS; ++i) {
     if(glbl_hist[i] != 0) {
-      printf("Hist[%d]=%d\n", i*HIST_BUCKET_NS, glbl_hist[i]);
+      fprintf(stdout, "Hist[%d]=%d\n", i*HIST_BUCKET_NS, glbl_hist[i]);
       fflush(stdout);
     }
   }
@@ -517,4 +524,6 @@ int main(int argc, char **argv)
 
   return 0;
 }
+
+
 
