@@ -1502,6 +1502,11 @@ void *pebs_policy_thread()
       // given how it is computed above. 
       // Then dram_delta should be <= interprocess_migrate
       assert((process->ratio / memshare_need) <= 1);
+ 
+      if(process->dram_delta < 0) {
+        process->dram_delta = 0;
+        process->migrate_down_bytes = 0;
+      }
       if(process->dram_delta == 0) {
           process->migrate_up_bytes = (process->ratio / memshare_need) * (interprocess_migrate);
           process->migrate_up_bytes = process->migrate_up_bytes > FAIR_SHARE_DRAM ? FAIR_SHARE_DRAM : process->migrate_up_bytes;
@@ -1513,8 +1518,7 @@ void *pebs_policy_thread()
           else
               process->migrate_up_bytes = process->dram_delta;
       }
-      else
-        process->migrate_up_bytes = 0;
+
       // round down to hugepage size
       process->migrate_up_bytes -= (process->migrate_up_bytes % PAGE_SIZE);
       assert(process->migrate_up_bytes <= (interprocess_migrate));
@@ -1535,6 +1539,11 @@ void *pebs_policy_thread()
       // given how it is computed above. 
       // Then dram_delta should be <= interprocess_migrate
       assert((process->ratio / memshare_take) <= 1);
+ 
+      if(process->dram_delta > 0) {
+        process->dram_delta = 0;
+        process->migrate_up_bytes = 0;
+      }
       if(process->dram_delta == 0) {
           process->migrate_down_bytes = (process->ratio / memshare_take) * (interprocess_migrate);
           process->migrate_down_bytes = process->migrate_down_bytes > (process->current_dram / 2) ? (process->current_dram / 2) : process->migrate_down_bytes;
@@ -1548,8 +1557,6 @@ void *pebs_policy_thread()
 
         process->dram_delta *= -1;
       }
-      else
-        process->migrate_down_bytes = 0;
 
       // round down to hugepage size
       process->migrate_down_bytes -= (process->migrate_down_bytes % PAGE_SIZE);
