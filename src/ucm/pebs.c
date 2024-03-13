@@ -1107,6 +1107,7 @@ void *pebs_policy_thread()
   double memshare_take;
   uint64_t memshare_proc;
   double delta_away;
+  bool migrate_down_flag = true;
 #endif
 
   thread = pthread_self();
@@ -1493,7 +1494,7 @@ void *pebs_policy_thread()
       process = process->next;
       pthread_mutex_unlock(&(tmp->process_lock)); 
     }
-
+    
     for(i = 0;i < num_need_memory; i++) {
       // Compute process->dram_delta here (>0)
       process = need_fastmem[i];
@@ -1509,12 +1510,15 @@ void *pebs_policy_thread()
       }
       if(process->dram_delta == 0) {
           process->migrate_up_bytes = (process->ratio / memshare_need) * (interprocess_migrate);
+          //process->migrate_up_bytes = (interprocess_migrate/processes_list.numentries);
           process->migrate_up_bytes = process->migrate_up_bytes > FAIR_SHARE_DRAM ? FAIR_SHARE_DRAM : process->migrate_up_bytes;
           process->dram_delta = FAIR_SHARE_DRAM;
       }
       else if(process->dram_delta > 0) {
           if(process->dram_delta > ((process->ratio / memshare_need) * (interprocess_migrate)))
               process->migrate_up_bytes = (process->ratio / memshare_need) * (interprocess_migrate);
+          //if(process->dram_delta > (interprocess_migrate / processes_list.numentries))
+          //    process->migrate_up_bytes = (interprocess_migrate/processes_list.numentries);
           else
               process->migrate_up_bytes = process->dram_delta;
       }
@@ -1546,12 +1550,15 @@ void *pebs_policy_thread()
       }
       if(process->dram_delta == 0) {
           process->migrate_down_bytes = (process->ratio / memshare_take) * (interprocess_migrate);
-          process->migrate_down_bytes = process->migrate_down_bytes > (process->current_dram / 2) ? (process->current_dram / 2) : process->migrate_down_bytes;
-          process->dram_delta = (process->current_dram / 2);
+          //process->migrate_down_bytes = (interprocess_migrate/processes_list.numentries);
+          process->migrate_down_bytes = process->migrate_down_bytes > (process->current_dram / 4) ? (process->current_dram / 4) : process->migrate_down_bytes;
+          process->dram_delta = (process->current_dram / 4);
       }
       else if(process->dram_delta < 0) {
           if((-1 * process->dram_delta) > ((process->ratio / memshare_take) * (interprocess_migrate)))
               process->migrate_down_bytes = (process->ratio / memshare_take) * (interprocess_migrate);
+          //if((-1 * process->dram_delta) > (interprocess_migrate/processes_list.numentries))
+          //    process->migrate_down_bytes = (interprocess_migrate/processes_list.numentries);
           else
               process->migrate_down_bytes = (-1 * process->dram_delta);
 
@@ -1572,22 +1579,31 @@ void *pebs_policy_thread()
       pthread_mutex_unlock(&(process->process_lock));
     }
 
-    if((delta_need > 0) && (delta_take > 0)) {
-      process = peek_process(&processes_list);
-      while(process != NULL) {
-        pthread_mutex_lock(&(process->process_lock));
-        if(process->dram_delta < 0) {
-          process_migrate_down(process, process->migrate_down_bytes);
-          process->dram_delta *= -1;
-          process->dram_delta -= process->migrate_down_bytes;
-          process->dram_delta *= -1;
-        }
-        tmp = process;
-        process = process->next;
-        pthread_mutex_unlock(&(tmp->process_lock)); 
+    if((DRAMSIZE - memshare_proc) > delta_need)
+        migrate_down_flag = false;
+    else
+        migrate_down_flag = true;
+    //if((delta_need > 0) && (delta_take > 0)) {
+    process = peek_process(&processes_list);
+    while(process != NULL) {
+      pthread_mutex_lock(&(process->process_lock));
+
+      if((process->dram_delta < 0) && migrate_down_flag) {
+        process_migrate_down(process, process->migrate_down_bytes);
+        process->dram_delta *= -1;
+        process->dram_delta -= process->migrate_down_bytes;
+        process->dram_delta *= -1;
       }
+      if(process->dram_delta > 0) {
+        process_migrate_up(process,process->migrate_up_bytes);
+        process->dram_delta -= process->migrate_up_bytes;
+      }
+      tmp = process;
+      process = process->next;
+      pthread_mutex_unlock(&(tmp->process_lock)); 
     }
-    if (dram_free_list.numentries != 0) {
+    //} Added by yojan
+    /*if (dram_free_list.numentries != 0) {
       process = peek_process(&processes_list);
       while(process != NULL) {
         pthread_mutex_lock(&(process->process_lock));
@@ -1599,7 +1615,7 @@ void *pebs_policy_thread()
         process = process->next;
         pthread_mutex_unlock(&(tmp->process_lock));
       }
-    }
+    }*/
      /* } else if((DRAMSIZE - memshare_proc) > delta_need) {  
         process = peek_process(&processes_list);
         while(process != NULL) {
