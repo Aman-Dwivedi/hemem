@@ -25,9 +25,9 @@
 #define DRAMPATH  "/dev/dax0.0"
 #define NVMPATH   "/dev/dax1.0"
 
-#define BASEPAGE_SIZE	  (4UL * 1024UL)
-#define HUGEPAGE_SIZE 	(2UL * 1024UL * 1024UL)
-#define GIGAPAGE_SIZE   (1024UL * 1024UL * 1024UL)
+#define BASEPAGE_SIZE	  (4L * 1024L)
+#define HUGEPAGE_SIZE 	(2L * 1024L * 1024L)
+#define GIGAPAGE_SIZE   (1024L * 1024L * 1024L)
 #define PAGE_SIZE 	    HUGEPAGE_SIZE
 #define PAGE_ROUND_UP(x) (((x) + (HUGEPAGE_SIZE)-1) & (~((HUGEPAGE_SIZE)-1)))
 
