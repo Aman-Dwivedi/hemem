@@ -422,6 +422,8 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
   process->need_cool_nvm = false;
   process->migrations_up = process->migrations_down = 0;
   process->migration_waits = 0;
+  process->decay_factor = 1;
+  process->prev_page_transfer = 0;
 
   process->zero = request->zero;
 

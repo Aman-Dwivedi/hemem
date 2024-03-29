@@ -62,6 +62,8 @@ struct hemem_process {
   _Atomic uint64_t volatile samples[24];
   double target_miss_ratio;
   double volatile current_miss_ratio;
+  int64_t decay_factor;
+  int64_t prev_page_transfer;
   FILE* logfd;
   uint64_t migrate_up_bytes, migrate_down_bytes;
   uint64_t migrations_up, migrations_down;

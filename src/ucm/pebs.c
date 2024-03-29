@@ -1095,8 +1095,8 @@ void *pebs_policy_thread()
   struct hemem_process *take_fastmem[MAX_PROCESSES];
   int num_need_memory;
   int num_take_memory;
-  uint64_t interprocess_migrate = PEBS_MIGRATE_RATE / 2;
-  uint64_t intraprocess_migrate = PEBS_MIGRATE_RATE / 2;
+  int64_t interprocess_migrate = PEBS_MIGRATE_RATE / 2;
+  int64_t intraprocess_migrate = PEBS_MIGRATE_RATE / 2;
   uint64_t migrate_share;
   uint64_t delta_need;
   uint64_t delta_take;
@@ -1114,6 +1114,13 @@ void *pebs_policy_thread()
     assert(0);
   }
 
+  bool fairshare = false;
+  char *c_fairshare = getenv("FAIRSHARE");
+  if (c_fairshare != NULL) {
+    fairshare = atoi(c_fairshare);
+  }
+  printf("FAIRSHARE %d\n", fairshare);
+
   for (;;) {
    gettimeofday(&start, NULL);
 #ifdef HEMEM_QOS
@@ -1123,6 +1130,9 @@ void *pebs_policy_thread()
     memshare_take = 0;
     delta_need = 0;
     delta_take = 0;
+
+    double total_slowdown = 0;
+    double total_procs = 0;
 
     // go through once to handle ring requests and calculate current miss ratios 
     process = peek_process(&processes_list);
@@ -1147,7 +1157,7 @@ void *pebs_policy_thread()
         // shouldn't try to manage it for now 
         process->current_miss_ratio = 0;
       }
-	    
+     
       for (int xxx = LAST_HEMEM_THREAD + 1; xxx < PEBS_NPROCS; xxx++) {
 	      process->samples[xxx] = 0;
 	    }
@@ -1167,49 +1177,70 @@ void *pebs_policy_thread()
       //  continue;
       //}
 
-      // TODO: Potentially needs tweaking
-      // DRAM allocation approach (from Simon):
-      // every epoch:
-      // Compute $f_i = a_miss / t_miss$ for all processes
-      // If $f_i > 1$, put into "need memory" list
-      // If $f_i < 1$, put into "take memory" list
-      // For all f_i in "need memory" list:
-      // $F = \sum{\forall i} f_i - 1$
-      // Give $((f_i - 1) / F) / c$ memory to process $i$
-      // For all f_i in "take memory" list:
-      // $F = \sum{\forall i} (t_miss / a_miss) - 1$
-      // Take $((f_i - 1) / F) / c$ memory from process $i$
+      if(fairshare) {
+        double full_fast_pages = DRAMSIZE / PAGE_SIZE;
+        double curr_fast_pages = process->current_dram / PAGE_SIZE;
+        double full_fast_shares = 0;
+        double curr_fast_shares = 0;
+        for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+          double this_tier_pages = min((double)(process->dram_lists[i].numentries + process->nvm_lists[i].numentries), full_fast_pages);
+          full_fast_shares += (1 << i) * this_tier_pages;
+          full_fast_pages -= this_tier_pages;
 
-      // how are we doing on our miss ratio vs target?
-      process->ratio = process->current_miss_ratio / process->target_miss_ratio;
+          this_tier_pages = min((double)(process->dram_lists[i].numentries + process->nvm_lists[i].numentries), curr_fast_pages);
+          curr_fast_shares += (1 << i) * this_tier_pages;
+          curr_fast_pages -= this_tier_pages;
+        }
+        if(full_fast_shares) {
+          process->ratio = curr_fast_shares / full_fast_shares;
+          total_slowdown += curr_fast_shares / full_fast_shares;
+          ++total_procs;
+        }
+      } else {
+        // TODO: Potentially needs tweaking
+        // DRAM allocation approach (from Simon):
+        // every epoch:
+        // Compute $f_i = a_miss / t_miss$ for all processes
+        // If $f_i > 1$, put into "need memory" list
+        // If $f_i < 1$, put into "take memory" list
+        // For all f_i in "need memory" list:
+        // $F = \sum{\forall i} f_i - 1$
+        // Give $((f_i - 1) / F) / c$ memory to process $i$
+        // For all f_i in "take memory" list:
+        // $F = \sum{\forall i} (t_miss / a_miss) - 1$
+        // Take $((f_i - 1) / F) / c$ memory from process $i$
 
-      if (process->ratio > 1.05) {
-        // not meeting target, do we have hot NVM pages? If no, it needs more DRAM
-        //if ((count_hottest_nvm_bins(process) > count_coldest_dram_bins(process))) {
-          // not meeting target and have more hot NVM pages than cold DRAM pages; give more dram
-          need_fastmem[num_need_memory] = process;
-          num_need_memory++;
-          process->ratio = process->ratio;
+        // how are we doing on our miss ratio vs target?
+        process->ratio = process->current_miss_ratio / process->target_miss_ratio;
+
+        if (process->ratio > 1.05) {
+          // not meeting target, do we have hot NVM pages? If no, it needs more DRAM
+          //if ((count_hottest_nvm_bins(process) > count_coldest_dram_bins(process))) {
+            // not meeting target and have more hot NVM pages than cold DRAM pages; give more dram
+            need_fastmem[num_need_memory] = process;
+            num_need_memory++;
+            process->ratio = process->ratio;
+            if (process->ratio > max_ratio) {
+              // clip ratio to some maximum, here the interprocess migrate rate
+              // TODO: Is this the right thing to do? The ratio could potentially
+              // be infinite
+              process->ratio = max_ratio;
+            }
+            memshare_need += process->ratio;
+          //}
+        } else if (process->ratio < 0.95) {
+          // below target, can take dram
+          take_fastmem[num_take_memory] = process;
+          num_take_memory++;
+          process->ratio = ((process->target_miss_ratio / process->current_miss_ratio));
           if (process->ratio > max_ratio) {
             // clip ratio to some maximum, here the interprocess migrate rate
-            // TODO: Is this the right thing to do? The ratio could potentially
-            // be infinite
+            // TODO: Is this the right thing to do? The ratio could be infinite
+            // particularly if the current miss ratio is 0
             process->ratio = max_ratio;
           }
-          memshare_need += process->ratio;
-        //}
-      } else if (process->ratio < 0.95) {
-        // below target, can take dram
-        take_fastmem[num_take_memory] = process;
-        num_take_memory++;
-        process->ratio = ((process->target_miss_ratio / process->current_miss_ratio));
-        if (process->ratio > max_ratio) {
-          // clip ratio to some maximum, here the interprocess migrate rate
-          // TODO: Is this the right thing to do? The ratio could be infinite
-          // particularly if the current miss ratio is 0
-          process->ratio = max_ratio;
+          memshare_take += process->ratio;
         }
-        memshare_take += process->ratio;
       }
 
       tmp = process;
@@ -1217,60 +1248,163 @@ void *pebs_policy_thread()
       pthread_mutex_unlock(&(tmp->process_lock));
     }
 
+    if(fairshare) {
+      total_slowdown /= total_procs;
+      // Figure out how many pages gets us to target performance
+      int64_t take_pages = 0;
+      int64_t get_pages = 0;
+      process = peek_process(&processes_list);
+      while (process != NULL) {
+        pthread_mutex_lock(&(process->process_lock));
 
-    //LOG("ratio of memory needed %.4f\tratio of memory taking %.4f\n", memshare_need, memshare_take);
+        double full_fast_pages = DRAMSIZE / PAGE_SIZE;
+        double proc_full_fast_share = 0;
+        for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+          double this_tier_pages = min((double)(process->dram_lists[i].numentries + process->nvm_lists[i].numentries), full_fast_pages);
+          proc_full_fast_share += (1 << i) * this_tier_pages;
+          full_fast_pages -= this_tier_pages;
+        }
+        double proc_req_fast_share = proc_full_fast_share * total_slowdown;
+        printf("Process %d: full fast share: %.1f, req fast share %.1f, curr fast share %.1f\n", 
+          process->pid, proc_full_fast_share, proc_req_fast_share, process->ratio * proc_full_fast_share);
+        int64_t proc_req_pages = 0;
+        for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+          int64_t this_tier_pages = min((process->dram_lists[i].numentries + process->nvm_lists[i].numentries), (int64_t)proc_req_fast_share / (1 << i));
+          proc_req_fast_share -= (1 << i) * this_tier_pages;
+          proc_req_pages += this_tier_pages;
+          //if(this_tier_pages)
+          //  printf("\ttier %d: this tier pages %ld, proc req %ld\n", i, this_tier_pages, proc_req_pages);
+        }
+        
+        process->dram_delta = (proc_req_pages - ((int64_t)(process->current_dram / PAGE_SIZE)));
 
-    // give share of migration bandwidth to processes that need more dram
-    for (i = 0; i < num_need_memory; i++) {
-      process = need_fastmem[i];
-      pthread_mutex_lock(&(process->process_lock));
-      // TODO: (process->atio / memshare_need) should be between 0 and 1, right?
-      // given how it is computed above. 
-      // Then dram_delta should be <= interprocess_migrate
-      assert((process->ratio / memshare_need) <= 1);
-      process->dram_delta = (process->ratio / memshare_need) * (interprocess_migrate / 2);
-      // round down to hugepage size
-      process->dram_delta -= (process->dram_delta % PAGE_SIZE);
-      assert(process->dram_delta <= (interprocess_migrate / 2));
-      if (process->dram_delta + process->current_dram > process->mem_allocated) {
-        // don't give out more dram than we need for this process
-        process->dram_delta -= ((process->dram_delta + process->current_dram) - process->mem_allocated);
+        // Decay page requests
+        if(process->prev_page_transfer * process->dram_delta < 0) {
+          // Requesting pages now, while previously giving pages or vice-versa; decay
+          process->decay_factor *= 8;
+          if(process->decay_factor > MAX_PROC_DECAY)
+            process->decay_factor = MAX_PROC_DECAY;
+        } else if(process->prev_page_transfer * process->dram_delta > 0) {
+          // Repeated request or repeated giving; undecay
+          process->decay_factor /= 2;
+          if(process->decay_factor < 1)
+            process->decay_factor = 1;
+        }
+        process->prev_page_transfer = process->dram_delta;
+        process->dram_delta /= process->decay_factor;
+        
+        if(process->dram_delta < 0)
+          take_pages += -1 * process->dram_delta;
+        else
+          get_pages += process->dram_delta;
+        printf("\treq dram_delta: %ld, req_pages %ld, curr dram %lu, get_pages %ld, take_pages %ld\n", 
+          process->dram_delta, proc_req_pages, (int64_t)process->current_dram / PAGE_SIZE, get_pages, take_pages);
+          
+        tmp = process;
+        process = process->next;
+        pthread_mutex_unlock(&(tmp->process_lock));
       }
-      assert(process->dram_delta >= 0);
-      delta_need += process->dram_delta;
-      pthread_mutex_unlock(&(process->process_lock));
-    }
-    
-    // give share of migration bandwidth to processes that are giving up dram
-    for (i = 0; i < num_take_memory; i++) {
-      process = take_fastmem[i];
-      pthread_mutex_lock(&(process->process_lock));
-      // TODO: (tmp_ratio / memshare_take) should be between 0 and 1, right?
-      // given how it is computed above. 
-      // Then dram_delta should be <= interprocess_migrate
-      assert((process->ratio / memshare_take) <= 1);
-      process->dram_delta = (process->ratio / memshare_take) * (interprocess_migrate / 2);
-      // round down to hugepage size
-      process->dram_delta -= (process->dram_delta % PAGE_SIZE);
-      assert(process->dram_delta <= (interprocess_migrate / 2));
-      if (process->dram_delta > process->current_dram) {
-        // don't take away more dram than this process is allowed
-        process->dram_delta = process->current_dram;
+      // Fix an amount of pages to transfer
+      int64_t transfer_pages = min(take_pages, get_pages);
+      printf("Transfer pages %ld\n", transfer_pages);
+      int64_t num_processes = ((processes_list.numentries > 0) ? processes_list.numentries : 1);
+      // Negotiate getting these pages for the processes
+      process = peek_process(&processes_list);
+      while (process != NULL) {
+        pthread_mutex_lock(&(process->process_lock));
+        // Assign pages proportionately based on requested amount
+        if(process->dram_delta < 0) {
+          if(transfer_pages >= 1 && take_pages >= 1) {
+            process->dram_delta = transfer_pages * ((double)process->dram_delta / (double)take_pages) * (int64_t)PAGE_SIZE;
+            if(process->dram_delta < -1 * interprocess_migrate / num_processes)
+              process->dram_delta = -1 * interprocess_migrate / num_processes;
+          }
+          else
+            process->dram_delta = 0;
+        } else if(process->dram_delta > 0 && get_pages >= 1) {
+          process->dram_delta = (transfer_pages + dram_free_list.numentries) * ((double)process->dram_delta / (double)get_pages) * (int64_t)PAGE_SIZE;
+          if(process->dram_delta > interprocess_migrate / num_processes)
+            process->dram_delta = interprocess_migrate / num_processes;
+        } else
+          process->dram_delta = 0;
+        // round down to hugepage size
+        process->dram_delta -= (process->dram_delta % PAGE_SIZE);
+
+        printf("Process %d: curr slowdown %f; target slowdown %f; dram_delta: %ld; decay factor: %ld\n", 
+          process->pid, process->ratio, total_slowdown, process->dram_delta, process->decay_factor);
+
+        tmp = process;
+        process = process->next;
+        pthread_mutex_unlock(&(tmp->process_lock));
       }
-      delta_take += process->dram_delta;
-      process->dram_delta *= -1;
-      assert(process->dram_delta <= 0);
-      // dram delta is negative if we are taking memory
-      pthread_mutex_unlock(&(process->process_lock));
-    }
+      // Set remaining migrate rate = TOTAL_RATE - interprocess_rate
+      migrate_share = intraprocess_migrate / num_processes;
+    } else {
+      // give share of migration bandwidth to processes that need more dram
+      for (i = 0; i < num_need_memory; i++) {
+        process = need_fastmem[i];
+        pthread_mutex_lock(&(process->process_lock));
+        // TODO: (process->atio / memshare_need) should be between 0 and 1, right?
+        // given how it is computed above. 
+        // Then dram_delta should be <= interprocess_migrate
+        assert((process->ratio / memshare_need) <= 1);
+        process->dram_delta = (process->ratio / memshare_need) * (interprocess_migrate / 2);
+        // round down to hugepage size
+        process->dram_delta -= (process->dram_delta % PAGE_SIZE);
+        assert(process->dram_delta <= (interprocess_migrate / 2));
+        if (process->dram_delta + process->current_dram > process->mem_allocated) {
+          // don't give out more dram than we need for this process
+          process->dram_delta -= ((process->dram_delta + process->current_dram) - process->mem_allocated);
+        }
+        assert(process->dram_delta >= 0);
+        delta_need += process->dram_delta;
+        pthread_mutex_unlock(&(process->process_lock));
+      }
+      
+      // give share of migration bandwidth to processes that are giving up dram
+      for (i = 0; i < num_take_memory; i++) {
+        process = take_fastmem[i];
+        pthread_mutex_lock(&(process->process_lock));
+        // TODO: (tmp_ratio / memshare_take) should be between 0 and 1, right?
+        // given how it is computed above. 
+        // Then dram_delta should be <= interprocess_migrate
+        assert((process->ratio / memshare_take) <= 1);
+        process->dram_delta = (process->ratio / memshare_take) * (interprocess_migrate / 2);
+        // round down to hugepage size
+        process->dram_delta -= (process->dram_delta % PAGE_SIZE);
+        assert(process->dram_delta <= (interprocess_migrate / 2));
+        if (process->dram_delta > process->current_dram) {
+          // don't take away more dram than this process is allowed
+          process->dram_delta = process->current_dram;
+        }
+        delta_take += process->dram_delta;
+        process->dram_delta *= -1;
+        assert(process->dram_delta <= 0);
+        // dram delta is negative if we are taking memory
+        pthread_mutex_unlock(&(process->process_lock));
+      }
     
-    // TODO: We should not have given out more DRAM than we have to give
-    // but this does not always hold. Bug? Or issue with algo?
-    if (delta_need != delta_take) {
-      if ((delta_need >= 0) && (delta_take == 0)) {
-        if (dram_free_list.numentries == 0) {
-          // we need dram and no one can give up any, and we don't have any free
-          // so keep allocations the same
+      // TODO: We should not have given out more DRAM than we have to give
+      // but this does not always hold. Bug? Or issue with algo?
+      if (delta_need != delta_take) {
+        if ((delta_need >= 0) && (delta_take == 0)) {
+          if (dram_free_list.numentries == 0) {
+            // we need dram and no one can give up any, and we don't have any free
+            // so keep allocations the same
+            process = peek_process(&processes_list);
+            while (process != NULL) {
+              pthread_mutex_lock(&(process->process_lock));
+
+              process->dram_delta = 0;
+
+              tmp = process;
+              process = process->next;
+              pthread_mutex_unlock(&(tmp->process_lock));
+            }
+          }
+        } else if ((delta_need == 0) || (delta_take == 0)) {
+          // keep allocations the same
+          // either no one needs more dram or we don't have any to give
           process = peek_process(&processes_list);
           while (process != NULL) {
             pthread_mutex_lock(&(process->process_lock));
@@ -1281,27 +1415,14 @@ void *pebs_policy_thread()
             process = process->next;
             pthread_mutex_unlock(&(tmp->process_lock));
           }
+        } else {
+          // TODO: What to do here? I imagine take some ratio or something?
+          //LOG("delta dram needed: %ld\tdelta dram taking: %ld\n", delta_need, delta_take);
         }
-      } else if ((delta_need == 0) || (delta_take == 0)) {
-        // keep allocations the same
-        // either no one needs more dram or we don't have any to give
-        process = peek_process(&processes_list);
-        while (process != NULL) {
-          pthread_mutex_lock(&(process->process_lock));
-
-          process->dram_delta = 0;
-
-          tmp = process;
-          process = process->next;
-          pthread_mutex_unlock(&(tmp->process_lock));
-        }
+        migrate_share = PEBS_MIGRATE_RATE / ((processes_list.numentries > 0) ? processes_list.numentries : 1);
       } else {
-        // TODO: What to do here? I imagine take some ratio or something?
-        //LOG("delta dram needed: %ld\tdelta dram taking: %ld\n", delta_need, delta_take);
+        migrate_share = intraprocess_migrate / ((processes_list.numentries > 0) ? processes_list.numentries : 1);
       }
-      migrate_share = PEBS_MIGRATE_RATE / ((processes_list.numentries > 0) ? processes_list.numentries : 1);
-    } else {
-      migrate_share = intraprocess_migrate / ((processes_list.numentries > 0) ? processes_list.numentries : 1);
     }
 
     //LOG("dram needed: %ld\tdram taking %ld\n", delta_need, delta_take);
@@ -1310,6 +1431,8 @@ void *pebs_policy_thread()
     process = peek_process(&processes_list);
     while (process != NULL) {
       pthread_mutex_lock(&(process->process_lock));
+      process->migrate_down_bytes = 0;
+      process->migrate_up_bytes = 0;
 
       if (process->dram_delta > 0) {
         // process can have more DRAM, so it can migrate things up if it can
@@ -1323,7 +1446,9 @@ void *pebs_policy_thread()
         process->migrate_down_bytes = -1 * process->dram_delta;
         //LOG("process %u (current miss ratio: %f) allocated %ld less dram, now allowed %lu dram\n", process->pid, process->current_miss_ratio, -1 * process->dram_delta, process->current_dram - process->dram_delta);
         //LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_down_bytes, process->migrate_up_bytes);
-      } else {
+      }
+
+      if(process->dram_delta == 0 || fairshare) {
         // process has correct amount of DRAM, need to migrate down enough pages
         // to free dram for the hot NVM pages. 
 
@@ -1362,12 +1487,14 @@ void *pebs_policy_thread()
             migrate_down_bytes += pages_from_cur_dram * PAGE_SIZE;
           }
         }
+        migrate_down_bytes -= min(migrate_down_bytes, process->migrate_up_bytes);
 
         if (migrate_down_bytes > (migrate_share / 2)) {
           migrate_down_bytes = (migrate_share / 2);
         }
-        process->migrate_down_bytes = migrate_down_bytes;
-        process->migrate_up_bytes = process->migrate_down_bytes;
+        process->migrate_down_bytes += migrate_down_bytes;
+        process->migrate_up_bytes += migrate_down_bytes;
+        printf("Process %d: intra-process migrate %u\n", process->pid, migrate_down_bytes);
         //LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_up_bytes, process->migrate_down_bytes);
       }
 
