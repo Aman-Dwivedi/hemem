@@ -1,6 +1,6 @@
 #!/bin/bash
 
-while [[ $( grep "source" $1 ) -eq "" ]]
+while [[ $( grep "source" $1 ) == "" ]]
 do
         sleep 1
         #echo "Waiting for graph setup"
