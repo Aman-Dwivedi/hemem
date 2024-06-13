@@ -1253,6 +1253,8 @@ void *pebs_policy_thread()
       // Figure out how many pages gets us to target performance
       int64_t take_pages = 0;
       int64_t get_pages = 0;
+      int64_t taking_procs = 0;
+      int64_t getting_procs = 0;
       process = peek_process(&processes_list);
       while (process != NULL) {
         pthread_mutex_lock(&(process->process_lock));
@@ -1293,10 +1295,13 @@ void *pebs_policy_thread()
         process->prev_page_transfer = process->dram_delta;
         process->dram_delta /= process->decay_factor;
         
-        if(process->dram_delta < 0)
+        if(process->dram_delta < 0) {
           take_pages += -1 * process->dram_delta;
-        else
+          ++taking_procs;
+        } else {
           get_pages += process->dram_delta;
+          ++getting_procs;
+        }
         printf("\treq dram_delta: %ld, req_pages %ld, curr dram %lu, get_pages %ld, take_pages %ld\n", 
           process->dram_delta, proc_req_pages, (int64_t)process->current_dram / PAGE_SIZE, get_pages, take_pages);
           
@@ -1306,6 +1311,11 @@ void *pebs_policy_thread()
       }
       // Fix an amount of pages to transfer
       int64_t transfer_pages = min(take_pages, get_pages);
+      if(transfer_pages > interprocess_migrate / 2 / (int64_t)PAGE_SIZE)
+        transfer_pages = interprocess_migrate / 2 / (int64_t)PAGE_SIZE;
+      transfer_pages -= dram_free_list.numentries;
+      if(transfer_pages < 0)
+        transfer_pages = 0;
       printf("Transfer pages %ld\n", transfer_pages);
       int64_t num_processes = ((processes_list.numentries > 0) ? processes_list.numentries : 1);
       // Negotiate getting these pages for the processes
@@ -1313,20 +1323,28 @@ void *pebs_policy_thread()
       while (process != NULL) {
         pthread_mutex_lock(&(process->process_lock));
         // Assign pages proportionately based on requested amount
+        // Process donating pages
         if(process->dram_delta < 0) {
           if(transfer_pages >= 1 && take_pages >= 1) {
             process->dram_delta = transfer_pages * ((double)process->dram_delta / (double)take_pages) * (int64_t)PAGE_SIZE;
-            if(process->dram_delta < -1 * interprocess_migrate / num_processes)
-              process->dram_delta = -1 * interprocess_migrate / num_processes;
           }
           else
             process->dram_delta = 0;
-        } else if(process->dram_delta > 0 && get_pages >= 1) {
+        }
+        // Process receiving pages
+        else if(process->dram_delta > 0 && get_pages >= 1) {
           process->dram_delta = (transfer_pages + dram_free_list.numentries) * ((double)process->dram_delta / (double)get_pages) * (int64_t)PAGE_SIZE;
-          if(process->dram_delta > interprocess_migrate / num_processes)
-            process->dram_delta = interprocess_migrate / num_processes;
-        } else
+        } else {
           process->dram_delta = 0;
+          // No process is receiving pages, but we have free DRAM pages
+          if (dram_free_list.numentries > 0 && get_pages == 0) {
+            // Proportionately hand it out to all processes
+            process->dram_delta += dram_free_list.numentries * (int64_t)PAGE_SIZE / getting_procs;
+            if(process->dram_delta > interprocess_migrate / getting_procs)
+              process->dram_delta = interprocess_migrate / getting_procs;
+          } 
+        }
+
         // round down to hugepage size
         process->dram_delta -= (process->dram_delta % PAGE_SIZE);
 
@@ -1703,7 +1721,24 @@ void pebs_remove_process(struct hemem_process *process)
   process->current_dram = 0;
   process->current_nvm = 0;
   pthread_mutex_unlock(&(process->process_lock));
-  
+  struct hemem_page *p;
+  for(int i = NUM_HOTNESS_LEVELS-1; i >= 0; i--) {
+    while(1) {
+      p = dequeue_page(&(process->dram_lists[i]));
+      if(p == NULL)
+        break;
+      // reset page stats
+      p->present = false;
+      p->pid = -1;
+      p->hot = COLD;
+      for (int i = 0; i < NPBUFTYPES; i++) {
+        p->accesses[i] = 0;
+        p->tot_accesses[i] = 0;
+      }
+      enqueue_page(&dram_free_list, p);
+    }
+  }
+  /*
   // allocate the newly freed dram among all the remaining processes
   // policy thread wil correct actual allocations later
   struct hemem_process *tmp, *tmp1;
@@ -1713,7 +1748,7 @@ void pebs_remove_process(struct hemem_process *process)
     tmp1 = tmp;
     tmp = tmp->next;
     pthread_mutex_unlock(&(tmp1->process_lock));
-  }
+  }*/
 }
 
 void pebs_init(void)
