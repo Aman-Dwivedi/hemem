@@ -14,6 +14,7 @@
 #define MAX_PROC_DECAY          (262144L)
 //#define HOT_WRITE_THRESHOLD       (4)
 #define PEBS_COOLING_THRESHOLD    (1024)
+#define PEBS_COOLING_PERIOD       (5) // (5 s)
 
 #define HOT_RING_REQS_THRESHOLD   (1024*1024)
 #define COLD_RING_REQS_THRESHOLD  (1024*1024)

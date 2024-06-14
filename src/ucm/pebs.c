@@ -150,6 +150,13 @@ void *pebs_scan_thread()
     assert(0);
   }
 
+  bool fairshare = false;
+  char *c_fairshare = getenv("FAIRSHARE");
+  if (c_fairshare != NULL) {
+    fairshare = atoi(c_fairshare);
+  }
+  printf("SCAN FAIRSHARE %d\n", fairshare);
+
   for(;;) {
     for (i = LAST_HEMEM_THREAD + 1; i < PEBS_NPROCS; i++) {
       for(j = 0; j < NPBUFTYPES; j++) {
@@ -198,7 +205,7 @@ void *pebs_scan_thread()
                     page->accesses[DRAMREAD] >>= (process->process_clock - page->local_clock);
                     page->accesses[NVMREAD] >>= (process->process_clock - page->local_clock);
                     page->local_clock = process->process_clock;
-                    if (page->accesses[j] > PEBS_COOLING_THRESHOLD) {
+                    if (page->accesses[j] > PEBS_COOLING_THRESHOLD && !fairshare) {
                       process->process_clock++;
                       dram_cools++;
                       nvm_cools++;
@@ -1120,9 +1127,19 @@ void *pebs_policy_thread()
     fairshare = atoi(c_fairshare);
   }
   printf("FAIRSHARE %d\n", fairshare);
+  // Store last time period cooled
+  bool needs_cooling = false;
+  struct timeval last_cooled;
+  gettimeofday(&last_cooled, NULL);
 
   for (;;) {
    gettimeofday(&start, NULL);
+    needs_cooling = false;
+    // Check if we need to cool processes (Currently used by AutoFMMR)
+    if(elapsed(&last_cooled, &start) > PEBS_COOLING_PERIOD) {
+      last_cooled = start;
+      needs_cooling = true;
+    }
 #ifdef HEMEM_QOS
     num_need_memory = 0;
     num_take_memory = 0;
@@ -1178,6 +1195,13 @@ void *pebs_policy_thread()
       //}
 
       if(fairshare) {
+        // Can move out of condition to apply to all policies
+        if(needs_cooling) {
+          process->process_clock++;
+          process->need_cool_dram = true;
+          process->need_cool_nvm = true;
+          process->cools++;
+        }
         double full_fast_pages = DRAMSIZE / PAGE_SIZE;
         double curr_fast_pages = process->current_dram / PAGE_SIZE;
         double full_fast_shares = 0;
