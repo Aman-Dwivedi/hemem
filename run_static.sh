@@ -26,7 +26,7 @@ wait ${flexkvs_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-isolated-log.txt
 
-sleep 5
+sleep 30
 
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- ./src/central-manager-fair >$debugfile 2>&1 &
 central_pid=$!
@@ -44,7 +44,7 @@ kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-gups-log.txt
 cp /tmp/log-$bggups_pid.txt data/static-fair/logs/gups-log.txt
 
-sleep 5
+sleep 30
 
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- ./src/central-manager-fair >$debugfile 2>&1 &
 central_pid=$!
@@ -62,7 +62,7 @@ kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-gapbs-log.txt
 cp /tmp/log-$gapbs_pid.txt data/static-fair/logs/gapbs-log.txt
 
-sleep 5
+sleep 30
 
 nice -20 numactl -N0 -m0 --physcpubind=0-3 --  ./src/central-manager-fair >$debugfile 2>&1 &
 central_pid=$!

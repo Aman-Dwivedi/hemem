@@ -64,12 +64,14 @@ struct hemem_process {
   double target_miss_ratio;
   double volatile current_miss_ratio;
   FILE* logfd;
+  int64_t dram_delta;
   uint64_t migrate_up_bytes, migrate_down_bytes;
   uint64_t migrations_up, migrations_down;
   uint64_t migration_waits;
-  int64_t dram_delta;
-  bool still_migrating;
   double ratio;
+#endif
+#ifdef FAIR_SHARE
+  int64_t fair_delta;
 #endif
   volatile uint64_t mem_allocated;
   volatile uint64_t current_dram;
