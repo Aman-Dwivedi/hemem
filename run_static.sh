@@ -25,6 +25,7 @@ flexkvs_pid=$!
 wait ${flexkvs_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-isolated-log.txt
+cp /tmp/log_ucm.txt data/static-fair/logs/central-manager-isolated-log.txt
 
 sleep 30
 
@@ -43,6 +44,7 @@ kill -9 ${bggups_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-gups-log.txt
 cp /tmp/log-$bggups_pid.txt data/static-fair/logs/gups-log.txt
+cp /tmp/log_ucm.txt data/static-fair/logs/central-manager-gups-log.txt
 
 sleep 30
 
@@ -61,6 +63,7 @@ kill -9 ${gapbs_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-gapbs-log.txt
 cp /tmp/log-$gapbs_pid.txt data/static-fair/logs/gapbs-log.txt
+cp /tmp/log_ucm.txt data/static-fair/logs/central-manager-gapbs-log.txt
 
 sleep 30
 
@@ -79,6 +82,7 @@ kill -9 ${bt_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt data/static-fair/logs/flexkvs-bt-log.txt
 cp /tmp/log-$bt_pid.txt data/static-fair/logs/bt-log.txt
+cp /tmp/log_ucm.txt data/static-fair/logs/central-manager-bt-log.txt
 
 
 #gnuplot data/miss-ratio-colocate.sh
