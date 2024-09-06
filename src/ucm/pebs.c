@@ -50,6 +50,11 @@ static struct perf_event_mmap_page *perf_page[PEBS_NPROCS][NPBUFTYPES];
 int pfd[PEBS_NPROCS][NPBUFTYPES];
 int sample_periods[PEBS_NPROCS];
 
+
+bool timed_cooling = false;
+bool autofmmr = false;
+
+
 static long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, 
     int cpu, int group_fd, unsigned long flags)
 {
@@ -127,6 +132,7 @@ static inline int access_to_index(uint64_t num) {
   return ret;
 }
 
+
 void *pebs_scan_thread()
 {
   struct perf_event_mmap_page *p;
@@ -149,14 +155,7 @@ void *pebs_scan_thread()
     perror("pthread_setaffinity_np");
     assert(0);
   }
-
-  bool fairshare = false;
-  char *c_fairshare = getenv("FAIRSHARE");
-  if (c_fairshare != NULL) {
-    fairshare = atoi(c_fairshare);
-  }
-  printf("SCAN FAIRSHARE %d\n", fairshare);
-
+  
   for(;;) {
     for (i = LAST_HEMEM_THREAD + 1; i < PEBS_NPROCS; i++) {
       for(j = 0; j < NPBUFTYPES; j++) {
@@ -205,7 +204,7 @@ void *pebs_scan_thread()
                     page->accesses[DRAMREAD] >>= (process->process_clock - page->local_clock);
                     page->accesses[NVMREAD] >>= (process->process_clock - page->local_clock);
                     page->local_clock = process->process_clock;
-                    if (page->accesses[j] > PEBS_COOLING_THRESHOLD && !fairshare) {
+                    if (page->accesses[j] > PEBS_COOLING_THRESHOLD && !timed_cooling) {
                       process->process_clock++;
                       dram_cools++;
                       nvm_cools++;
@@ -1127,18 +1126,21 @@ void *pebs_policy_thread()
     fairshare = atoi(c_fairshare);
   }
   printf("FAIRSHARE %d\n", fairshare);
+  
   // Store last time period cooled
   bool needs_cooling = false;
   struct timeval last_cooled;
   gettimeofday(&last_cooled, NULL);
 
   for (;;) {
-   gettimeofday(&start, NULL);
-    needs_cooling = false;
-    // Check if we need to cool processes (Currently used by AutoFMMR)
-    if(elapsed(&last_cooled, &start) > PEBS_COOLING_PERIOD) {
-      last_cooled = start;
-      needs_cooling = true;
+    gettimeofday(&start, NULL);
+    if (timed_cooling) {
+      needs_cooling = false;
+      // Check if we need to cool processes (Currently used by AutoFMMR)
+      if(elapsed(&last_cooled, &start) > PEBS_COOLING_PERIOD) {
+        last_cooled = start;
+        needs_cooling = true;
+      }
     }
 #ifdef HEMEM_QOS
     num_need_memory = 0;
@@ -1193,15 +1195,15 @@ void *pebs_policy_thread()
       //  pthread_mutex_unlock(&(tmp->process_lock));
       //  continue;
       //}
+      // Can move out of condition to apply to all policies
+      if(timed_cooling && needs_cooling) {
+        process->process_clock++;
+        process->need_cool_dram = true;
+        process->need_cool_nvm = true;
+        process->cools++;
+      }
 
       if(fairshare) {
-        // Can move out of condition to apply to all policies
-        if(needs_cooling) {
-          process->process_clock++;
-          process->need_cool_dram = true;
-          process->need_cool_nvm = true;
-          process->cools++;
-        }
         double full_fast_pages = DRAMSIZE / PAGE_SIZE;
         double curr_fast_pages = process->current_dram / PAGE_SIZE;
         double full_fast_shares = 0;
@@ -1291,7 +1293,7 @@ void *pebs_policy_thread()
           full_fast_pages -= this_tier_pages;
         }
         double proc_req_fast_share = proc_full_fast_share * total_slowdown;
-        printf("Process %d: full fast share: %.1f, req fast share %.1f, curr fast share %.1f\n", 
+        LOG("Process %d: full fast share: %.1f, req fast share %.1f, curr fast share %.1f\n", 
           process->pid, proc_full_fast_share, proc_req_fast_share, process->ratio * proc_full_fast_share);
         int64_t proc_req_pages = 0;
         for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
@@ -1326,7 +1328,7 @@ void *pebs_policy_thread()
           get_pages += process->dram_delta;
           ++getting_procs;
         }
-        printf("\treq dram_delta: %ld, req_pages %ld, curr dram %lu, get_pages %ld, take_pages %ld\n", 
+        LOG("\treq dram_delta: %ld, req_pages %ld, curr dram %lu, get_pages %ld, take_pages %ld\n", 
           process->dram_delta, proc_req_pages, (int64_t)process->current_dram / PAGE_SIZE, get_pages, take_pages);
           
         tmp = process;
@@ -1340,7 +1342,7 @@ void *pebs_policy_thread()
       transfer_pages -= dram_free_list.numentries;
       if(transfer_pages < 0)
         transfer_pages = 0;
-      printf("Transfer pages %ld\n", transfer_pages);
+      LOG("Transfer pages %ld\n", transfer_pages);
       int64_t num_processes = ((processes_list.numentries > 0) ? processes_list.numentries : 1);
       // Negotiate getting these pages for the processes
       process = peek_process(&processes_list);
@@ -1372,7 +1374,7 @@ void *pebs_policy_thread()
         // round down to hugepage size
         process->dram_delta -= (process->dram_delta % PAGE_SIZE);
 
-        printf("Process %d: curr slowdown %f; target slowdown %f; dram_delta: %ld; decay factor: %ld\n", 
+        LOG("Process %d: curr slowdown %f; target slowdown %f; dram_delta: %ld; decay factor: %ld\n", 
           process->pid, process->ratio, total_slowdown, process->dram_delta, process->decay_factor);
 
         tmp = process;
@@ -1536,7 +1538,7 @@ void *pebs_policy_thread()
         }
         process->migrate_down_bytes += migrate_down_bytes;
         process->migrate_up_bytes += migrate_down_bytes;
-        printf("Process %d: intra-process migrate %u\n", process->pid, migrate_down_bytes);
+        LOG("Process %d: intra-process migrate %lu\n", process->pid, migrate_down_bytes);
         //LOG("process %u migrating %lu bytes down and %lu bytes up\n", process->pid, process->migrate_up_bytes, process->migrate_down_bytes);
       }
 
@@ -1834,6 +1836,18 @@ void pebs_init(void)
 
     enqueue_page(&nvm_free_list, p);
   }
+
+  char *c_timed_cooling = getenv("TIMEDCOOLING");
+  if (c_timed_cooling != NULL) {
+    timed_cooling = atoi(c_timed_cooling);
+  }
+  printf("TIMED COOLING %d\n", timed_cooling);
+
+  char *c_autofmmr = getenv("AUTOFMMR");
+  if (c_autofmmr != NULL) {
+    autofmmr = atoi(c_autofmmr);
+  }
+  printf("AUTOFMMR %d\n", autofmmr);
 
   ret = pthread_create(&scan_thread, NULL, pebs_scan_thread, NULL);
   assert(ret == 0);
