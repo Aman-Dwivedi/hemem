@@ -56,7 +56,6 @@ struct hemem_process {
 
   bool zero;
 
-#ifdef HEMEM_QOS
   _Atomic uint64_t volatile accessed_pages[NPBUFTYPES];
   _Atomic uint64_t volatile wrong_memtype;
   _Atomic uint64_t volatile samples[24];
@@ -70,7 +69,6 @@ struct hemem_process {
   uint64_t migration_waits;
   int64_t dram_delta;
   double ratio;
-#endif
   volatile uint64_t mem_allocated;
   volatile uint64_t current_dram;
   volatile uint64_t current_nvm;
