@@ -967,13 +967,6 @@ void *pebs_policy_thread()
     assert(0);
   }
 
-  bool fairshare = false;
-  char *c_fairshare = getenv("FAIRSHARE");
-  if (c_fairshare != NULL) {
-    fairshare = atoi(c_fairshare);
-  }
-  printf("FAIRSHARE %d\n", fairshare);
-  
   // Store last time period cooled
   bool needs_cooling = false;
   struct timeval last_cooled;
@@ -1040,39 +1033,43 @@ void *pebs_policy_thread()
         process->cools++;
       }
 
-      if(fairshare) {
-        double full_fast_pages = DRAMSIZE / PAGE_SIZE;
-        double curr_fast_pages = process->current_dram / PAGE_SIZE;
-        double full_fast_shares = 0;
-        double curr_fast_shares = 0;
+      if(autofmmr) {
+        uint64_t full_fast_pages = DRAMSIZE / PAGE_SIZE;
+        uint64_t curr_fast_pages = process->current_dram / PAGE_SIZE;
+        uint64_t full_fast_shares = 0;
+        uint64_t curr_fast_shares = 0;
         for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          double this_tier_pages = min((double)(process->dram_lists[i].numentries + process->nvm_lists[i].numentries), full_fast_pages);
+          uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, full_fast_pages);
           full_fast_shares += (1 << i) * this_tier_pages;
           full_fast_pages -= this_tier_pages;
 
-          this_tier_pages = min((double)(process->dram_lists[i].numentries + process->nvm_lists[i].numentries), curr_fast_pages);
+          this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, curr_fast_pages);
           curr_fast_shares += (1 << i) * this_tier_pages;
           curr_fast_pages -= this_tier_pages;
         }
         if(full_fast_shares) {
-          process->ratio = curr_fast_shares / full_fast_shares;
-          total_ratio += curr_fast_shares / full_fast_shares;
+          process->ratio = (1.0 * curr_fast_shares) / full_fast_shares;
+          total_ratio += (1.0 * curr_fast_shares) / full_fast_shares;
           ++total_procs;
         }
       } else {
-        int64_t total_bin_accesses = 0;
-        int64_t total_dram_accesses = 0;
+        // compute total accesses and total dram accesses
+        uint64_t total_bin_accesses = 0;
+        uint64_t total_dram_accesses = 0;
         for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          int64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
           total_bin_accesses += (1 << i) * this_tier_pages;
 
           this_tier_pages = process->dram_lists[i].numentries;
           total_dram_accesses += (1 << i) * this_tier_pages;
         }
 
-        int64_t ideal_bin_accesses = 0;
+        // compute ideal bins needed to achieve target
+        // start from highest bins for both DRAM and NVM. The highest count pages should all be in
+        // DRAM (eventually)
+        uint64_t ideal_bin_accesses = 0;
         for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          int64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
           ideal_bin_accesses += (1 << i) * this_tier_pages;
 
           if (((1.0 * ideal_bin_accesses) / total_bin_accesses) >= (1 - process->target_miss_ratio)) {
@@ -1080,7 +1077,7 @@ void *pebs_policy_thread()
           }
         }
         if (ideal_bin_accesses) {
-          process->ratio = total_dram_accesses / ideal_bin_accesses;
+          process->ratio = (1.0 * total_dram_accesses) / ideal_bin_accesses;
           total_ratio += process->ratio;
           ++total_procs;
         }
@@ -1103,38 +1100,38 @@ void *pebs_policy_thread()
       
       int64_t proc_req_pages = 0;
 
-      if (fairshare) {
-        double full_fast_pages = DRAMSIZE / PAGE_SIZE;
-        double proc_full_fast_share = 0;
+      if (autofmmr) {
+        uint64_t full_fast_pages = DRAMSIZE / PAGE_SIZE;
+        uint64_t proc_full_fast_share = 0;
         for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          double this_tier_pages = min((double)(process->dram_lists[i].numentries + process->nvm_lists[i].numentries), full_fast_pages);
+          uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, full_fast_pages);
           proc_full_fast_share += (1 << i) * this_tier_pages;
           full_fast_pages -= this_tier_pages;
         }
         double proc_req_fast_share = proc_full_fast_share * total_ratio;
-        LOG("Process %d: full fast share: %.1f, req fast share %.1f, curr fast share %.1f\n", 
+        LOG("Process %d: full fast share: %lu, req fast share %.1f, curr fast share %.1f\n", 
           process->pid, proc_full_fast_share, proc_req_fast_share, process->ratio * proc_full_fast_share);
         for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          int64_t this_tier_pages = min((process->dram_lists[i].numentries + process->nvm_lists[i].numentries), (int64_t)proc_req_fast_share / (1 << i));
+          uint64_t this_tier_pages = min((process->dram_lists[i].numentries + process->nvm_lists[i].numentries), (uint64_t)proc_req_fast_share / (1 << i));
           proc_req_fast_share -= (1 << i) * this_tier_pages;
           proc_req_pages += this_tier_pages;
           //if(this_tier_pages)
           //  printf("\ttier %d: this tier pages %ld, proc req %ld\n", i, this_tier_pages, proc_req_pages);
         }
       } else {
-        int64_t total_bin_accesses = 0;
-        int64_t total_dram_accesses = 0;
+        uint64_t total_bin_accesses = 0;
+        uint64_t total_dram_accesses = 0;
         for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          int64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
           total_bin_accesses += (1 << i) * this_tier_pages;
 
           this_tier_pages = process->dram_lists[i].numentries;
           total_dram_accesses += (1 << i) * this_tier_pages;
         }
 
-        int64_t ideal_bin_accesses = 0;
+        uint64_t ideal_bin_accesses = 0;
         for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          int64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
           ideal_bin_accesses += (1 << i) * this_tier_pages;
           proc_req_pages += this_tier_pages;
 

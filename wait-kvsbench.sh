@@ -9,5 +9,3 @@ do
 done
 
 echo "kvsbench Ready"
-echo `pidof kvsbench`:0.05 > /tmp/miss_ratio_update
-kill -s USR2 `pidof central-manager`
