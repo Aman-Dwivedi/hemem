@@ -1,6 +1,6 @@
 #!/bin/bash -x
 HEMEM=/home/amanda/hemem
-OUTPUT=/home/amanda/hemem/microbenchmarks/data/colocate
+OUTPUT=/home/amanda/hemem/microbenchmarks/data/colocate-autofmmr
 
 export LD_LIBRARY_PATH=${HEMEM}/src:$LD_LIBRARY_PATH;
 echo 1000000 > /proc/sys/vm/max_map_count;
