@@ -350,8 +350,11 @@ int main(int argc, char **argv)
   log_hot_size = atof(argv[5]);
   tot_hot_size = (unsigned long)(1) << log_hot_size;
 
-  if(argc > 6 && atoi(argv[6]))
+  if(argc > 6 && atoi(argv[6])) {
+    fprintf(stderr, "will wait for startup signal\n");
+    fflush(stderr);
     wait_for_signal = true;
+  }
   log_filename = argv[7];
 
   fprintf(stderr, "%lu updates per thread (%d threads)\n", updates, threads);
@@ -455,8 +458,10 @@ int main(int argc, char **argv)
   
   if(wait_for_signal) {
     fprintf(stderr, "Waiting for signal\n");
+    fflush(stderr);
     while(!received_signal);
     fprintf(stderr, "Received signal\n");
+    fflush(stderr);
   }
 
   pthread_t print_thread;

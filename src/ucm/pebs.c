@@ -1081,6 +1081,8 @@ void *pebs_policy_thread()
           total_ratio += process->ratio;
           ++total_procs;
         }
+        LOG("Process %d: target hit ratio: %.4f, ideal bin accesses: %ld, total bin accesses %ld, total dram accesses %ld\n, ratio: %.4f", 
+          process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, total_bin_accesses, total_dram_accesses, process->ratio);
       }
 
       tmp = process;
@@ -1120,29 +1122,29 @@ void *pebs_policy_thread()
         }
       } else {
         uint64_t total_bin_accesses = 0;
-        uint64_t total_dram_accesses = 0;
-        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
-          total_bin_accesses += (1 << i) * this_tier_pages;
-
-          this_tier_pages = process->dram_lists[i].numentries;
-          total_dram_accesses += (1 << i) * this_tier_pages;
-        }
-
         uint64_t ideal_bin_accesses = 0;
         for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
           uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+          total_bin_accesses += (1 << i) * this_tier_pages;
+        }
+
+        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
           ideal_bin_accesses += (1 << i) * this_tier_pages;
-          proc_req_pages += this_tier_pages;
 
           if (((1.0 * ideal_bin_accesses) / total_bin_accesses) >= (1 - process->target_miss_ratio)) {
             break;
           }
         }
         double proc_req_fast_share = ideal_bin_accesses * total_ratio;
-        LOG("Process %d: ideal fast share: %ld, req fast share %.1f, curr fast share %.1f\n", 
-          process->pid, ideal_bin_accesses, proc_req_fast_share, process->ratio * ideal_bin_accesses);
+        LOG("Process %d: target hit ratio: %.4f, ideal fast share: %ld, req fast share %.1f, curr fast share %.1f\n", 
+          process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, proc_req_fast_share, process->ratio * ideal_bin_accesses);
 
+        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+          uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, (uint64_t)proc_req_fast_share / (1 << i));
+          proc_req_fast_share -= (1 << i) * this_tier_pages;
+          proc_req_pages += this_tier_pages;
+        }
       }
         
       process->dram_delta = (proc_req_pages - ((int64_t)(process->current_dram / PAGE_SIZE)));
@@ -1151,13 +1153,15 @@ void *pebs_policy_thread()
       if(process->prev_page_transfer * process->dram_delta < 0) {
         // Requesting pages now, while previously giving pages or vice-versa; decay
         process->decay_factor *= 8;
-        if(process->decay_factor > MAX_PROC_DECAY)
+        if(process->decay_factor > MAX_PROC_DECAY) {
           process->decay_factor = MAX_PROC_DECAY;
+        }
       } else if(process->prev_page_transfer * process->dram_delta > 0) {
         // Repeated request or repeated giving; undecay
         process->decay_factor /= 2;
-        if(process->decay_factor < 1)
+        if(process->decay_factor < 1) {
           process->decay_factor = 1;
+        }
       }
       process->prev_page_transfer = process->dram_delta;
       process->dram_delta /= process->decay_factor;
@@ -1178,11 +1182,14 @@ void *pebs_policy_thread()
     }
     // Fix an amount of pages to transfer
     int64_t transfer_pages = min(take_pages, get_pages);
-    if(transfer_pages > interprocess_migrate / 2 / (int64_t)PAGE_SIZE)
+    if(transfer_pages > interprocess_migrate / 2 / (int64_t)PAGE_SIZE) {
       transfer_pages = interprocess_migrate / 2 / (int64_t)PAGE_SIZE;
+    }
+    // if some pages can be satisfied from free dram pages, reduce the pages taken from processes
     transfer_pages -= dram_free_list.numentries;
-    if(transfer_pages < 0)
+    if(transfer_pages < 0) {
       transfer_pages = 0;
+    }
     LOG("Transfer pages %ld\n", transfer_pages);
     int64_t num_processes = ((processes_list.numentries > 0) ? processes_list.numentries : 1);
     // Negotiate getting these pages for the processes

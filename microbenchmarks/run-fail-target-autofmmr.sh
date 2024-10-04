@@ -17,7 +17,7 @@ rm -f $debugfile
 ./run-perf.sh >/dev/null 2>&1 &
 run_perf_pid=$!
 
-nice -20 numactl -C0,1,2,3 -m0 -- env TIMEDCOOLING=1 ${HEMEM}/src/central-manager >$debugfile 2>&1 &
+nice -20 numactl -C0,1,2,3 -m0 -- env AUTOFMMR=1 TIMEDCOOLING=1 ${HEMEM}/src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 30
 nice -20 numactl -C8,9 -m0   -- env START_CPU=8  MISS_RATIO=0.1 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/microbenchmarks/gups-pebs 2 0 36 8 35 0 /tmp/gups-first.txt &
@@ -60,7 +60,7 @@ cp /tmp/gups-fifth.txt  ${OUTPUT}/gups/fifth-gups.txt
 
 sleep 5
 
-gnuplot ${OUTPUT}/miss-ratio-fail-target.sh
-gnuplot ${OUTPUT}/gups-fail-target.sh
+gnuplot ${OUTPUT}/miss-ratio-fail-target-autofmmr.sh
+gnuplot ${OUTPUT}/gups-fail-target-autofmmr.sh
 
 pkill perf

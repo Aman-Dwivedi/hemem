@@ -1,8 +1,8 @@
 #!/bin/bash -x
 
-HEMEM=/home/aditya/hemem-ucm
-OUTPUT=/home/aditya/hemem-ucm/dyn_fairshare_results
-MODEL=/mnt/sda1/models/Llama-2-70b-chat-hf/ggml-model-f16.gguf
+HEMEM=/home/amanda/hemem
+OUTPUT=/home/amanda/hemem/data/dynamic-autofmmr
+MODEL=/mnt/sda1/LLaMa2/Llama-2-70b-hf/ggml-model-f16.gguf
 
 export LD_LIBRARY_PATH=${HEMEM}/src:${HEMEM}/Hoard/src:$LD_LIBRARY_PATH;
 echo 1000000 > /proc/sys/vm/max_map_count;
@@ -11,11 +11,8 @@ mkdir -p ${OUTPUT}
 mkdir -p ${OUTPUT}/logs
 mkdir -p ${OUTPUT}/perf
 
-#rm ${OUTPUT}/logs/*
-#rm ${OUTPUT}/perf/*
-
-debugfile=/tmp/debug.txt
-rm -f $debugfile
+rm ${OUTPUT}/logs/*
+rm ${OUTPUT}/perf/*
 
 ./run_perf.sh >/dev/null 2>&1 &
 run_perf_pid=$!
@@ -57,6 +54,6 @@ kill -9 ${run_perf_pid}
 pkill perf
 
 
-#cp /tmp/log-$flexkvs_pid.txt ${OUTPUT}/logs/flexkvs-log.txt
-#cp /tmp/log-$gups_pid.txt ${OUTPUT}/logs/gups-log.txt
-#cp /tmp/log-$llama_pid.txt ${OUTPUT}/logs/llama-log.txt
+cp /tmp/log-$flexkvs_pid.txt ${OUTPUT}/logs/flexkvs-log.txt
+cp /tmp/log-$gups_pid.txt ${OUTPUT}/logs/gups-log.txt
+cp /tmp/log-$llama_pid.txt ${OUTPUT}/logs/llama-log.txt

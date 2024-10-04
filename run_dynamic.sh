@@ -1,12 +1,17 @@
 #!/bin/bash -x
-mkdir -p data/dynamic/logs
-mkdir -p data/dynamic/perf
+HEMEM=/home/amanda/hemem
+OUTPUT=/home/amanda/hemem/data/dynamic
+MODEL=/mnt/sda1/LLaMa2/Llama-2-70b-hf/ggml-model-f16.gguf
 
-rm data/dynamic/logs/*
-rm data/dynamic/perf/*
+export LD_LIBRARY_PATH=${HEMEM}/src:${HEMEM}/Hoard/src:$LD_LIBRARY_PATH;
+echo 1000000 > /proc/sys/vm/max_map_count;
 
-debugfile=/tmp/debug.txt
-rm -f $debugfile
+mkdir -p ${OUTPUT}
+mkdir -p ${OUTPUT}/logs
+mkdir -p ${OUTPUT}/perf
+
+rm ${OUTPUT}/logs/*
+rm ${OUTPUT}/perf/*
 
 ./run_perf.sh >/dev/null 2>&1 &
 run_perf_pid=$!
@@ -18,20 +23,20 @@ DYNTIME=400
 HOTFRAC1=0.15
 HOTFRAC2=0.30
 
-nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 ./src/central-manager >$debugfile 2>&1 &
+nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 ${HEMEM}/src/central-manager > ${OUTPUT}/logs/cm.txt 2>&1 &
 central_pid=$!
 sleep 30
-nice -20 numactl -N0 -m0 --physcpubind=19-23 -- env MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem-llama.so ./apps/llama.cpp/main -m /mnt/sda1/LLaMa2/Llama-2-70b-hf/ggml-model-f16.gguf --threads 4 -p "The key to happiness in one short sentence is:" -n 120 -e > data/dynamic/perf/llama.txt 2>&1 &
+nice -20 numactl -N0 -m0 --physcpubind=19-23 -- env MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem-llama.so ${HEMEM}/apps/llama.cpp/main -m ${MODEL} --threads 4 -p "The key to happiness in one short sentence is:" -n 120 -e > ${OUTPUT}/perf/llama.txt 2>&1 &
 llama_pid=$!
-perf stat -e instructions -I 1000 -p ${llama_pid} -o data/dynamic/perf/llama-ipc.txt &
-./wait-llama.sh data/dynamic/perf/llama.txt
-nice -20 numactl -N0 -m0 --physcpubind=14-18 -- env START_CPU=14 REQ_DRAM=0 MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./microbenchmarks/gups-pebs 4 0 37 8 36 1 data/dynamic/perf/gups.txt > data/dynamic/perf/gups-setup.txt 2>&1 &
+perf stat -e instructions -I 1000 -p ${llama_pid} -o ${OUTPUT}/perf/llama-ipc.txt &
+./wait-llama.sh ${OUTPUT}/perf/llama.txt
+nice -20 numactl -N0 -m0 --physcpubind=14-18 -- env START_CPU=14 REQ_DRAM=0 MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/microbenchmarks/gups-pebs 4 0 37 8 36 1 ${OUTPUT}/perf/gups.txt > ${OUTPUT}/perf/gups-setup.txt 2>&1 &
 gups_pid=$!
-perf stat -e instructions -I 1000 -p ${gups_pid} -o data/dynamic/perf/gups-ipc.txt &
-./wait-gups.sh data/dynamic/perf/gups-setup.txt
-nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} -D ${DYNTIME} -H ${HOTFRAC2} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > data/dynamic/perf/flexkvs.txt &
+perf stat -e instructions -I 1000 -p ${gups_pid} -o ${OUTPUT}/perf/gups-ipc.txt &
+./wait-gups.sh ${OUTPUT}/perf/gups-setup.txt
+nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} -D ${DYNTIME} -H ${HOTFRAC2} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > ${OUTPUT}/perf/flexkvs.txt &
 flexkvs_pid=$!
-./wait-kvsbench.sh data/dynamic/perf/flexkvs.txt
+./wait-kvsbench.sh ${OUTPUT}/perf/flexkvs.txt
 echo ${flexkvs_pid}:0.05 > /tmp/miss_ratio_update
 kill -s USR2 ${central_pid}
 sleep 300
@@ -48,6 +53,6 @@ kill -9 ${run_perf_pid}
 pkill perf
 
 
-cp /tmp/log-$flexkvs_pid.txt data/dynamic/logs/flexkvs-log.txt
-cp /tmp/log-$gups_pid.txt data/dynamic/logs/gups-log.txt
-cp /tmp/log-$llama_pid.txt data/dynamic/logs/llama-log.txt
+cp /tmp/log-$flexkvs_pid.txt ${OUTPUT}/logs/flexkvs-log.txt
+cp /tmp/log-$gups_pid.txt ${OUTPUT}/logs/gups-log.txt
+cp /tmp/log-$llama_pid.txt ${OUTPUT}/logs/llama-log.txt

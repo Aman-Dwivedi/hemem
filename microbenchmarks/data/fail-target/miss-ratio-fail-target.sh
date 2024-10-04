@@ -17,8 +17,6 @@ set yrange [0:1]
 set xlabel "Time (s)"
 set ylabel "Miss Ratio"
 
-load "data/fail-target-marks.gnuplot"
-
 cpu_freq=2100000000
 start=`awk '{ if(min == 0) { min = $1 } else { min = $1 < min ? $1 : min } } END { print min }' data/fail-target/logs/*.txt`
 
