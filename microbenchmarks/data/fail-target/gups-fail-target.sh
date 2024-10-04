@@ -17,7 +17,7 @@ set ytics 0.002
 #set key at 70, 0.024
 #set key bottom right
 set key outside top left horizontal font ",7"
-set xrange [0:500]
+set xrange [0:]
 set yrange [0:0.01]
 
 set xlabel "Time (s)"

@@ -11,7 +11,7 @@ file5="data/fail-target/logs/fifth-log.txt"
 set datafile separator "\t"
 set ytics 0.25
 set key outside top left horizontal font ",7"
-set xrange [0:500]
+set xrange [0:]
 set yrange [0:1]
 
 set xlabel "Time (s)"
