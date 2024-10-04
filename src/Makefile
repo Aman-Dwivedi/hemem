@@ -21,7 +21,7 @@ LIBS = -lm -lpthread
 HEMEM_LIBS = $(LIBS) -ldl -lsyscall_intercept
 
 default: all
-all:app central-manager lib-mmap-populate
+all:app central-manager lib-mmap-populate tmts-manager
 app: libhemem.so libhemem-llama.so
 
 libhemem-llama.so: hemem-app-llama.o interpose-llama.o channel-shared-app.o channel-app.o logging-app.o
@@ -47,6 +47,10 @@ channel-app.o: ${APP}/channel-app.c ${APP}/channel-app.h
 
 central-manager: ucm.o channel-shared.o channel-ucm.o timer.o hemem-ucm.o pebs.o fifo.o spsc-ring.o logging.o
 	$(CC) -o central-manager ucm.o channel-shared.o channel-ucm.o timer.o pebs.o hemem-ucm.o fifo.o spsc-ring.o logging.o -lpthread
+
+tmts-manager: ${UCM}/ucm.c ${SHARED}/channel-shared.c ${UCM}/channel-ucm.c \
+			  ${UCM}/timer.c ${UCM}/hemem-ucm.c ${UCM}/pebs.c ${UCM}/fifo.c ${UCM}/spsc-ring.c ${SHARED}//logging.c
+	$(CC) $(SHARED_CFLAGS) $(SHARED_INCLUDES) $(UCM_CFLAGS) $(UCM_INCLUDES) -o $@ $^ -lpthread -D TMTS
 
 ucm.o: ${UCM}/ucm.c
 	$(CC) $(UCM_CFLAGS) $(UCM_INCLUDES) -c ${UCM}/ucm.c
@@ -85,4 +89,4 @@ lib-mmap-populate: lib_mmap_populate.c
 	$(CC) lib_mmap_populate.c -lsyscall_intercept -fpic -shared -o libmmap_populate.so
 
 clean:
-	$(RM) *.o *.so central-manager
+	$(RM) *.o *.so central-manager tmts-manager

@@ -427,6 +427,10 @@ struct hemem_process* ucm_add_process(int fd, struct add_process_request* reques
 
   process->max_dram = request->req_dram;
 
+#ifdef TMTS
+  gettimeofday(&process->timestamp, NULL);
+#endif
+
   snprintf(&logpath[0], sizeof(logpath) - 1, "/tmp/log-%d.txt", process->pid);
   process->logfd = fopen(logpath, "w");
   if (process->logfd == NULL) {
