@@ -11,7 +11,7 @@ rm -f $debugfile
 ./run-perf.sh >/dev/null 2>&1 &
 run_perf_pid=$!
 
-nice -20 numactl -C0,1,2,3 -m0 -- ./../src/central-manager >$debugfile 2>&1 &
+nice -20 numactl -C0,1,2,3 -m0 -- env TIMEDCOOLING=1 ./../src/central-manager >$debugfile 2>&1 &
 central_pid=$!
 sleep 15
 nice -20 numactl -C4,5,6,7 -m0   -- env START_CPU=4  MISS_RATIO=0.1 LD_PRELOAD=/home/amanda/hemem/src/libhemem.so ./gups-pebs 4 0 36 8 34 0 /tmp/gups-first.txt &

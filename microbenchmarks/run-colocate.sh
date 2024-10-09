@@ -40,7 +40,7 @@ gups5_pid=$!
 sleep 60
 echo $gups1_pid:0.1 > /tmp/miss_ratio_update
 kill -s USR2 $central_pid
-sleep 240
+sleep 300
 
 kill -9 ${gups1_pid} 
 kill -9 ${gups2_pid} 
