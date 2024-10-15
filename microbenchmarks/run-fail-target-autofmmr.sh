@@ -34,7 +34,7 @@ gups4_pid=$!
 sleep 240
 nice -20 numactl -C16,17 -m0 -- env START_CPU=16 MISS_RATIO=0.1  LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/microbenchmarks/gups-pebs 2 0 36 8 35 0 /tmp/gups-fifth.txt &
 gups5_pid=$!
-sleep 270
+sleep 360
 
 kill -9 ${gups1_pid} 
 kill -9 ${gups2_pid} 
