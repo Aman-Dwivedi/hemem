@@ -37,7 +37,7 @@ sleep 5
 nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 ${HEMEM}/src/central-manager > ${OUTPUT}/logs/cm_flexkvs-gups.txt 2>&1 &
 central_pid=$!
 sleep 30
-nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env START_CPU=14  MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/microbenchmarks/gups-pebs 8 0 38 8 36 0 ${OUTPUT}/perf/bggups.txt > ${OUTPUT}/perf/bggups-setup.txt &
+nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env START_CPU=14  MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/microbenchmarks/gups-pebs 8 0 38 8 36 1 ${OUTPUT}/perf/bggups.txt > ${OUTPUT}/perf/bggups-setup.txt &
 bggups_pid=$!
 perf stat -e instructions -I 1000 -p ${bggups_pid} -o ${OUTPUT}/perf/bggups-ipc.txt &
 ./wait-gups.sh ${OUTPUT}/perf/bggups-setup.txt
@@ -46,8 +46,9 @@ flexkvs_pid=$!
 ./wait-kvsbench.sh ${OUTPUT}/perf/flexkvs-gups.txt
 echo ${flexkvs_pid}:0.05 > /tmp/miss_ratio_update
 kill -s USR2 ${central_pid}
+kill -s USR1 ${bggups_pid}
 wait ${flexkvs_pid}
-kill -9 ${bggups_pid}
+kill -s USR2 ${bggups_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt ${OUTPUT}/logs/flexkvs-gups-log.txt
 cp /tmp/log-$bggups_pid.txt ${OUTPUT}/logs/gups-log.txt
@@ -66,6 +67,7 @@ flexkvs_pid=$!
 ./wait-kvsbench.sh ${OUTPUT}/perf/flexkvs-gapbs.txt
 echo ${flexkvs_pid}:0.05 > /tmp/miss_ratio_update
 kill -s USR2 ${central_pid}
+kill -s USR1 ${gapbs_pid}
 wait ${flexkvs_pid}
 kill -9 ${gapbs_pid}
 kill -9 ${central_pid}
@@ -86,6 +88,7 @@ flexkvs_pid=$!
 ./wait-kvsbench.sh ${OUTPUT}/perf/flexkvs-bt.txt
 echo ${flexkvs_pid}:0.05 > /tmp/miss_ratio_update
 kill -s USR2 ${central_pid}
+kill -s USR1 ${bt_pid}
 wait ${flexkvs_pid}
 kill -9 ${bt_pid}
 kill -9 ${central_pid}

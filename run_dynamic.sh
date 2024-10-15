@@ -1,7 +1,7 @@
 #!/bin/bash -x
 HEMEM=/home/amanda/hemem
 OUTPUT=/home/amanda/hemem/data/dynamic
-MODEL=/mnt/sda1/LLaMa2/Llama-2-70b-hf/ggml-model-f16.gguf
+MODEL=/mnt/sda1/models/Llama-2-70b-chat-hf/ggml-model-f16.gguf
 
 export LD_LIBRARY_PATH=${HEMEM}/src:${HEMEM}/Hoard/src:$LD_LIBRARY_PATH;
 echo 1000000 > /proc/sys/vm/max_map_count;
