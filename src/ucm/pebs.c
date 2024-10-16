@@ -50,7 +50,7 @@ static struct perf_event_mmap_page *perf_page[PEBS_NPROCS][NPBUFTYPES];
 int pfd[PEBS_NPROCS][NPBUFTYPES];
 int sample_periods[PEBS_NPROCS];
 
-
+bool disable_realloc = false;
 bool timed_cooling = false;
 bool autofmmr = false;
 
@@ -1344,207 +1344,211 @@ void *pebs_policy_thread()
         process->need_cool_nvm = true;
         process->cools++;
       }
-
-      if(autofmmr) {
-        uint64_t full_fast_pages = DRAMSIZE / PAGE_SIZE;
-        uint64_t curr_fast_pages = process->current_dram / PAGE_SIZE;
-        uint64_t full_fast_shares = 0;
-        uint64_t curr_fast_shares = 0;
-        for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, full_fast_pages);
-          full_fast_shares += (1 << i) * this_tier_pages;
-          full_fast_pages -= this_tier_pages;
-
-          this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, curr_fast_pages);
-          curr_fast_shares += (1 << i) * this_tier_pages;
-          curr_fast_pages -= this_tier_pages;
-        }
-        if(full_fast_shares) {
-          process->ratio = (1.0 * curr_fast_shares) / full_fast_shares;
-          total_ratio += (1.0 * curr_fast_shares) / full_fast_shares;
-          ++total_procs;
-        }
-      } else {
-        // compute total accesses and total dram accesses
-        uint64_t total_bin_accesses = 0;
-        uint64_t total_dram_accesses = 0;
-        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
-          total_bin_accesses += (1 << i) * this_tier_pages;
-
-          this_tier_pages = process->dram_lists[i].numentries;
-          total_dram_accesses += (1 << i) * this_tier_pages;
-        }
-
-        // compute ideal bins needed to achieve target
-        // start from highest bins for both DRAM and NVM. The highest count pages should all be in
-        // DRAM (eventually)
-        uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;;
-/*
-        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
-          ideal_bin_accesses += (1 << i) * this_tier_pages;
-
-          if (((1.0 * ideal_bin_accesses) / total_bin_accesses) >= (1 - process->target_miss_ratio)) {
-            break;
-          }
-        }
-*/
-        if (ideal_bin_accesses) {
-          process->ratio = (1.0 * total_dram_accesses) / ideal_bin_accesses;
-          total_ratio += process->ratio;
-          ++total_procs;
-        }
-        LOG("Process %d: target hit ratio: %.4f, ideal bin accesses: %ld, total bin accesses %ld, total dram accesses %ld\n, ratio: %.4f", 
-          process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, total_bin_accesses, total_dram_accesses, process->ratio);
-      }
-
-      tmp = process;
-      process = process->next;
-      pthread_mutex_unlock(&(tmp->process_lock));
-    }
-
-    total_ratio /= total_procs;
-    // Figure out how many pages gets us to target performance
-    int64_t take_pages = 0;
-    int64_t get_pages = 0;
-    int64_t taking_procs = 0;
-    int64_t getting_procs = 0;
-    process = peek_process(&processes_list);
-    while (process != NULL) {
-      pthread_mutex_lock(&(process->process_lock));
       
-      int64_t proc_req_pages = 0;
+      if (!disable_realloc) {
+        if(autofmmr) {
+          uint64_t full_fast_pages = DRAMSIZE / PAGE_SIZE;
+          uint64_t curr_fast_pages = process->current_dram / PAGE_SIZE;
+          uint64_t full_fast_shares = 0;
+          uint64_t curr_fast_shares = 0;
+          for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, full_fast_pages);
+            full_fast_shares += (1 << i) * this_tier_pages;
+            full_fast_pages -= this_tier_pages;
 
-      if (autofmmr) {
-        uint64_t full_fast_pages = DRAMSIZE / PAGE_SIZE;
-        uint64_t proc_full_fast_share = 0;
-        for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, full_fast_pages);
-          proc_full_fast_share += (1 << i) * this_tier_pages;
-          full_fast_pages -= this_tier_pages;
-        }
-        double proc_req_fast_share = proc_full_fast_share * total_ratio;
-        LOG("Process %d: full fast share: %lu, req fast share %.1f, curr fast share %.1f\n", 
-          process->pid, proc_full_fast_share, proc_req_fast_share, process->ratio * proc_full_fast_share);
-        for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = min((process->dram_lists[i].numentries + process->nvm_lists[i].numentries), (uint64_t)proc_req_fast_share / (1 << i));
-          proc_req_fast_share -= (1 << i) * this_tier_pages;
-          proc_req_pages += this_tier_pages;
-          //if(this_tier_pages)
-          //  printf("\ttier %d: this tier pages %ld, proc req %ld\n", i, this_tier_pages, proc_req_pages);
-        }
-      } else {
-        uint64_t total_bin_accesses = 0;
-        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
-          total_bin_accesses += (1 << i) * this_tier_pages;
-        }
+            this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, curr_fast_pages);
+            curr_fast_shares += (1 << i) * this_tier_pages;
+            curr_fast_pages -= this_tier_pages;
+          }
+          if(full_fast_shares) {
+            process->ratio = (1.0 * curr_fast_shares) / full_fast_shares;
+            total_ratio += (1.0 * curr_fast_shares) / full_fast_shares;
+            ++total_procs;
+          }
+        } else {
+          // compute total accesses and total dram accesses
+          uint64_t total_bin_accesses = 0;
+          uint64_t total_dram_accesses = 0;
+          for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+            total_bin_accesses += (1 << i) * this_tier_pages;
 
-        uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
-/*
-        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
-          ideal_bin_accesses += (1 << i) * this_tier_pages;
+            this_tier_pages = process->dram_lists[i].numentries;
+            total_dram_accesses += (1 << i) * this_tier_pages;
+          }
 
-          if (((1.0 * ideal_bin_accesses) / total_bin_accesses) >= (1 - process->target_miss_ratio)) {
-            break;
+          // compute ideal bins needed to achieve target
+          // start from highest bins for both DRAM and NVM. The highest count pages should all be in
+          // DRAM (eventually)
+          uint64_t ideal_bin_accesses = 0;
+          for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+            ideal_bin_accesses += (1 << i) * this_tier_pages;
+
+            if (((1.0 * ideal_bin_accesses) / total_bin_accesses) >= (1 - process->target_miss_ratio)) {
+              break;
+            }
+          }
+          if (ideal_bin_accesses) {
+            process->ratio = (1.0 * total_dram_accesses) / ideal_bin_accesses;
+            total_ratio += process->ratio;
+            ++total_procs;
+          }
+          LOG("Process %d: target hit ratio: %.4f, ideal bin accesses: %ld, total bin accesses %ld, total dram accesses %ld\n, ratio: %.4f", 
+            process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, total_bin_accesses, total_dram_accesses, process->ratio);
+        }
+      }
+
+      tmp = process;
+      process = process->next;
+      pthread_mutex_unlock(&(tmp->process_lock));
+    }
+
+    int64_t num_processes = ((processes_list.numentries > 0) ? processes_list.numentries : 1);
+
+    if (!disable_realloc) {
+      total_ratio /= total_procs;
+      int64_t take_pages = 0;
+      int64_t get_pages = 0;
+      int64_t taking_procs = 0;
+      int64_t getting_procs = 0;
+      // Figure out how many pages gets us to target performance
+      process = peek_process(&processes_list);
+      while (process != NULL) {
+        pthread_mutex_lock(&(process->process_lock));
+      
+        int64_t proc_req_pages = 0;
+
+        if (autofmmr) {
+          uint64_t full_fast_pages = DRAMSIZE / PAGE_SIZE;
+          uint64_t proc_full_fast_share = 0;
+          for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, full_fast_pages);
+            proc_full_fast_share += (1 << i) * this_tier_pages;
+            full_fast_pages -= this_tier_pages;
+          }
+          double proc_req_fast_share = proc_full_fast_share * total_ratio;
+          LOG("Process %d: full fast share: %lu, req fast share %.1f, curr fast share %.1f\n", 
+            process->pid, proc_full_fast_share, proc_req_fast_share, process->ratio * proc_full_fast_share);
+          for(int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = min((process->dram_lists[i].numentries + process->nvm_lists[i].numentries), (uint64_t)proc_req_fast_share / (1 << i));
+            proc_req_fast_share -= (1 << i) * this_tier_pages;
+            proc_req_pages += this_tier_pages;
+            //if(this_tier_pages)
+            //  printf("\ttier %d: this tier pages %ld, proc req %ld\n", i, this_tier_pages, proc_req_pages);
+          }
+        } else {
+          uint64_t total_bin_accesses = 0;
+          uint64_t ideal_bin_accesses = 0;
+          for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+            total_bin_accesses += (1 << i) * this_tier_pages;
+          }
+
+          for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
+            ideal_bin_accesses += (1 << i) * this_tier_pages;
+
+            if (((1.0 * ideal_bin_accesses) / total_bin_accesses) >= (1 - process->target_miss_ratio)) {
+              break;
+            }
+          }
+          double proc_req_fast_share = ideal_bin_accesses * total_ratio;
+          LOG("Process %d: target hit ratio: %.4f, ideal fast share: %ld, req fast share %.1f, curr fast share %.1f\n", 
+            process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, proc_req_fast_share, process->ratio * ideal_bin_accesses);
+
+          for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
+            uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, (uint64_t)proc_req_fast_share / (1 << i));
+            proc_req_fast_share -= (1 << i) * this_tier_pages;
+            proc_req_pages += this_tier_pages;
           }
         }
-*/
-        double proc_req_fast_share = ideal_bin_accesses * total_ratio;
-        LOG("Process %d: target hit ratio: %.4f, ideal fast share: %ld, req fast share %.1f, curr fast share %.1f\n", 
-          process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, proc_req_fast_share, process->ratio * ideal_bin_accesses);
-
-        for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
-          uint64_t this_tier_pages = min(process->dram_lists[i].numentries + process->nvm_lists[i].numentries, (uint64_t)proc_req_fast_share / (1 << i));
-          proc_req_fast_share -= (1 << i) * this_tier_pages;
-          proc_req_pages += this_tier_pages;
-        }
-      }
         
-      process->dram_delta = (proc_req_pages - ((int64_t)(process->current_dram / PAGE_SIZE)));
+        process->dram_delta = (proc_req_pages - ((int64_t)(process->current_dram / PAGE_SIZE)));
 
-      // Decay page requests
-      if(process->prev_page_transfer * process->dram_delta < 0) {
-        // Requesting pages now, while previously giving pages or vice-versa; decay
-        process->decay_factor *= 8;
-        if(process->decay_factor > MAX_PROC_DECAY) {
-          process->decay_factor = MAX_PROC_DECAY;
+        // Decay page requests
+        if(process->prev_page_transfer * process->dram_delta < 0) {
+          // Requesting pages now, while previously giving pages or vice-versa; decay
+          process->decay_factor *= 8;
+          if(process->decay_factor > MAX_PROC_DECAY) {
+            process->decay_factor = MAX_PROC_DECAY;
+          } 
+        } else if(process->prev_page_transfer * process->dram_delta > 0) {
+          // Repeated request or repeated giving; undecay
+          process->decay_factor /= 2;
+          if(process->decay_factor < 1) {
+            process->decay_factor = 1;
+          }
         }
-      } else if(process->prev_page_transfer * process->dram_delta > 0) {
-        // Repeated request or repeated giving; undecay
-        process->decay_factor /= 2;
-        if(process->decay_factor < 1) {
-          process->decay_factor = 1;
-        }
-      }
-      process->prev_page_transfer = process->dram_delta;
-      process->dram_delta /= process->decay_factor;
+        process->prev_page_transfer = process->dram_delta;
+        process->dram_delta /= process->decay_factor;
         
-      if(process->dram_delta < 0) {
-        take_pages += -1 * process->dram_delta;
-        ++taking_procs;
-      } else {
-        get_pages += process->dram_delta;
-        ++getting_procs;
-      }
-      LOG("\treq dram_delta: %ld, req_pages %ld, curr dram %lu, get_pages %ld, take_pages %ld\n", 
-        process->dram_delta, proc_req_pages, (int64_t)process->current_dram / PAGE_SIZE, get_pages, take_pages);
+        if(process->dram_delta < 0) {
+          take_pages += -1 * process->dram_delta;
+          ++taking_procs;
+        } else {
+          get_pages += process->dram_delta;
+          ++getting_procs;
+        }
+        LOG("\treq dram_delta: %ld, req_pages %ld, curr dram %lu, get_pages %ld, take_pages %ld\n", 
+          process->dram_delta, proc_req_pages, (int64_t)process->current_dram / PAGE_SIZE, get_pages, take_pages);
           
-      tmp = process;
-      process = process->next;
-      pthread_mutex_unlock(&(tmp->process_lock));
-    }
-    // Fix an amount of pages to transfer
-    int64_t transfer_pages = min(take_pages, get_pages);
-    if(transfer_pages > interprocess_migrate / 2 / (int64_t)PAGE_SIZE) {
-      transfer_pages = interprocess_migrate / 2 / (int64_t)PAGE_SIZE;
-    }
-    // if some pages can be satisfied from free dram pages, reduce the pages taken from processes
-    transfer_pages -= dram_free_list.numentries;
-    if(transfer_pages < 0) {
-      transfer_pages = 0;
-    }
-    LOG("Transfer pages %ld\n", transfer_pages);
-    int64_t num_processes = ((processes_list.numentries > 0) ? processes_list.numentries : 1);
-    // Negotiate getting these pages for the processes
-    process = peek_process(&processes_list);
-    while (process != NULL) {
-      pthread_mutex_lock(&(process->process_lock));
-      // Assign pages proportionately based on requested amount
-      // Process donating pages
-      if(process->dram_delta < 0) {
-        if(transfer_pages >= 1 && take_pages >= 1) {
-          process->dram_delta = transfer_pages * ((double)process->dram_delta / (double)take_pages) * (int64_t)PAGE_SIZE;
+        tmp = process;
+        process = process->next;
+        pthread_mutex_unlock(&(tmp->process_lock));
+      }
+
+      // Fix an amount of pages to transfer
+      int64_t transfer_pages = max(take_pages, get_pages);
+      if(transfer_pages > interprocess_migrate / 2 / (int64_t)PAGE_SIZE) {
+        transfer_pages = interprocess_migrate / 2 / (int64_t)PAGE_SIZE;
+      }
+      // if some pages can be satisfied from free dram pages, reduce the pages taken from processes
+      transfer_pages -= dram_free_list.numentries;
+      if(transfer_pages < 0) {
+        transfer_pages = 0;
+      }
+      LOG("Transfer pages %ld\n", transfer_pages);
+
+      // Negotiate getting these pages for the processes
+      process = peek_process(&processes_list);
+      while (process != NULL) {
+        pthread_mutex_lock(&(process->process_lock));
+        // Assign pages proportionately based on requested amount
+        // Process donating pages
+        if(process->dram_delta < 0) {
+          if(transfer_pages >= 1 && take_pages >= 1) {
+            process->dram_delta = transfer_pages * ((double)process->dram_delta / (double)take_pages) * (int64_t)PAGE_SIZE;
+          }
+          else {
+            process->dram_delta = 0;
+          }
         }
-        else
+        // Process receiving pages
+        else if(process->dram_delta > 0 && get_pages >= 1) {
+          process->dram_delta = (transfer_pages + dram_free_list.numentries) * ((double)process->dram_delta / (double)get_pages) * (int64_t)PAGE_SIZE;
+        } else {
           process->dram_delta = 0;
+          // No process is receiving pages, but we have free DRAM pages
+          if (dram_free_list.numentries > 0 && get_pages == 0) {
+            // Proportionately hand it out to all processes
+            process->dram_delta += dram_free_list.numentries * (int64_t)PAGE_SIZE / getting_procs;
+            if(process->dram_delta > interprocess_migrate / getting_procs)
+              process->dram_delta = interprocess_migrate / getting_procs;
+          } 
+        }
+
+        // round down to hugepage size
+        process->dram_delta -= (process->dram_delta % PAGE_SIZE);
+
+        LOG("Process %d: curr ratio %f; target ratio %f; dram_delta: %ld; decay factor: %ld\n", 
+          process->pid, process->ratio, total_ratio, process->dram_delta, process->decay_factor);
+
+        tmp = process;
+        process = process->next;
+        pthread_mutex_unlock(&(tmp->process_lock));
       }
-      // Process receiving pages
-      else if(process->dram_delta > 0 && get_pages >= 1) {
-        process->dram_delta = (transfer_pages + dram_free_list.numentries) * ((double)process->dram_delta / (double)get_pages) * (int64_t)PAGE_SIZE;
-      } else {
-        process->dram_delta = 0;
-        // No process is receiving pages, but we have free DRAM pages
-        if (dram_free_list.numentries > 0 && get_pages == 0) {
-          // Proportionately hand it out to all processes
-          process->dram_delta += dram_free_list.numentries * (int64_t)PAGE_SIZE / getting_procs;
-          if(process->dram_delta > interprocess_migrate / getting_procs)
-            process->dram_delta = interprocess_migrate / getting_procs;
-        } 
-      }
-
-      // round down to hugepage size
-      process->dram_delta -= (process->dram_delta % PAGE_SIZE);
-
-      LOG("Process %d: curr ratio %f; target ratio %f; dram_delta: %ld; decay factor: %ld\n", 
-        process->pid, process->ratio, total_ratio, process->dram_delta, process->decay_factor);
-
-      tmp = process;
-      process = process->next;
-      pthread_mutex_unlock(&(tmp->process_lock));
-    }
+    } 
     // Set remaining migrate rate = TOTAL_RATE - interprocess_rate
     migrate_share = intraprocess_migrate / num_processes;
 
@@ -1862,6 +1866,12 @@ void pebs_init(void)
   }
   printf("AUTOFMMR %d\n", autofmmr);
 
+  char *c_disable_realloc = getenv("NOREALLOC");
+  if (c_disable_realloc != NULL) {
+    disable_realloc = atoi(c_disable_realloc);
+  }
+  printf("NO REALLOC %d\n", disable_realloc);
+
   ret = pthread_create(&scan_thread, NULL, pebs_scan_thread, NULL);
   assert(ret == 0);
   
@@ -1979,3 +1989,4 @@ void pebs_stats()
 
   hemem_pages_cnt = total_pages_cnt = other_processes_cnt = 0;
 }
+

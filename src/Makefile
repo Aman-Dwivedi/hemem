@@ -86,7 +86,10 @@ logging-app.o: ${SHARED}/logging.c ${SHARED}/logging.h
 	$(CC) $(APP_CFLAGS) $(SHARED_INCLUDES) -o logging-app.o -c $(SHARED)/logging.c
 
 lib-mmap-populate: lib_mmap_populate.c
-	$(CC) lib_mmap_populate.c -lsyscall_intercept -fpic -shared -o libmmap_populate.so
+	$(CC) lib_mmap_populate.c -fpic -shared -lsyscall_intercept -o libmmap_populate.so
+
+lib-mmap-populate-llama: lib_mmap_populate.c
+	$(CC) -D LLAMA lib_mmap_populate.c -fpic -shared -lsyscall_intercept -o libmmap_populate_llama.so
 
 clean:
 	$(RM) *.o *.so central-manager tmts-manager

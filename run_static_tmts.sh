@@ -1,21 +1,16 @@
 #!/bin/bash -x
 
 HEMEM=/home/amanda/hemem
-OUTPUT=/home/amanda/hemem/data/static-autofmmr
+OUTPUT=/home/amanda/hemem/data/static-tmts
 
 export LD_LIBRARY_PATH=${HEMEM}/src:$LD_LIBRARY_PATH;
 echo 1000000 > /proc/sys/vm/max_map_count;
 
-
-mkdir -p ${OUTPUT}
 mkdir -p ${OUTPUT}/logs
 mkdir -p ${OUTPUT}/perf
 
 rm ${OUTPUT}/logs/*
 rm ${OUTPUT}/perf/*
-
-debugfile=/tmp/debug.txt
-rm -f $debugfile
 
 ./run_perf.sh >/dev/null 2>&1 &
 run_perf_pid=$!
@@ -25,7 +20,7 @@ RUNTIME=600
 WARMUP=200
 HOTFRAC1=0.15
 
-nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 AUTOFMMR=1 ${HEMEM}/src/central-manager > ${OUTPUT}/logs/cm_flexkvs-isolated.txt 2>&1 &
+nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 ${HEMEM}/src/tmts-manager > ${OUTPUT}/logs/cm_flexkvs-isolated.txt 2>&1 &
 central_pid=$!
 sleep 30
 nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > ${OUTPUT}/perf/flexkvs-isolated.txt &
@@ -36,16 +31,17 @@ kill -s USR2 ${central_pid}
 wait ${flexkvs_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt ${OUTPUT}/logs/flexkvs-isolated-log.txt
+
 sleep 5
 
-nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 AUTOFMMR=1 ${HEMEM}/src/central-manager > ${OUTPUT}/logs/cm_flexkvs-gups.txt 2>&1 &
+nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 ${HEMEM}/src/tmts-manager > ${OUTPUT}/logs/cm_flexkvs-gups.txt 2>&1 &
 central_pid=$!
 sleep 30
 nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env START_CPU=14  MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/microbenchmarks/gups-pebs 8 0 38 8 36 1 ${OUTPUT}/perf/bggups.txt > ${OUTPUT}/perf/bggups-setup.txt &
 bggups_pid=$!
 perf stat -e instructions -I 1000 -p ${bggups_pid} -o ${OUTPUT}/perf/bggups-ipc.txt &
 ./wait-gups.sh ${OUTPUT}/perf/bggups-setup.txt
-nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ./apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > ${OUTPUT}/perf/flexkvs-gups.txt &
+nice -20 numactl -N0 -m0 --physcpubind=4-13 -- env MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/apps/flexkvs/kvsbench -t 4 -T ${RUNTIME} -w ${WARMUP} -h ${HOTFRAC1} 127.0.0.1:11211 -S ${FLEXKV_SIZE} > ${OUTPUT}/perf/flexkvs-gups.txt &
 flexkvs_pid=$!
 ./wait-kvsbench.sh ${OUTPUT}/perf/flexkvs-gups.txt
 echo ${flexkvs_pid}:0.05 > /tmp/miss_ratio_update
@@ -59,7 +55,7 @@ cp /tmp/log-$bggups_pid.txt ${OUTPUT}/logs/gups-log.txt
 
 sleep 5
 
-nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 AUTOFMMR=1 ${HEMEM}/src/central-manager > ${OUTPUT}/logs/cm_flexkvs-gapbs.txt 2>&1 &
+nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 ${HEMEM}/src/tmts-manager > ${OUTPUT}/logs/cm_flexkvs-gapbs.txt 2>&1 &
 central_pid=$!
 sleep 30
 nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env OMP_THREAD_LIMIT=8 MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/apps/gapbs/bc -n 50 -g 29 > ${OUTPUT}/perf/gapbs.txt &
@@ -80,7 +76,7 @@ cp /tmp/log-$gapbs_pid.txt ${OUTPUT}/logs/gapbs-log.txt
 
 sleep 5
 
-nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1 AUTOFMMR=1 ${HEMEM}/src/central-manager > ${OUTPUT}/logs/cm_flexkvs-bt.txt 2>&1 &
+nice -20 numactl -N0 -m0 --physcpubind=0-3 -- env TIMEDCOOLING=1  ${HEMEM}/src/tmts-manager > ${OUTPUT}/logs/cm_flexkvs-bt.txt 2>&1 &
 central_pid=$!
 sleep 30
 nice -20 numactl -N0 -m0 --physcpubind=14-23 -- env OMP_THREAD_LIMIT=8 MISS_RATIO=1.0 LD_PRELOAD=${HEMEM}/src/libhemem.so ${HEMEM}/apps/nas-bt-c-benchmark/NPB-OMP/bin/bt.E -n 50 -g 28 > ${OUTPUT}/perf/bt.txt &
@@ -98,6 +94,7 @@ kill -9 ${bt_pid}
 kill -9 ${central_pid}
 cp /tmp/log-$flexkvs_pid.txt ${OUTPUT}/logs/flexkvs-bt-log.txt
 cp /tmp/log-$bt_pid.txt ${OUTPUT}/logs/bt-log.txt
+
 
 #gnuplot data/miss-ratio-colocate.sh
 #gnuplot data/gups-colocate.sh
