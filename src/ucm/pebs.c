@@ -1380,7 +1380,8 @@ void *pebs_policy_thread()
           // compute ideal bins needed to achieve target
           // start from highest bins for both DRAM and NVM. The highest count pages should all be in
           // DRAM (eventually)
-          uint64_t ideal_bin_accesses = 0;
+          uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
+/*
           for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
             uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
             ideal_bin_accesses += (1 << i) * this_tier_pages;
@@ -1389,6 +1390,7 @@ void *pebs_policy_thread()
               break;
             }
           }
+*/
           if (ideal_bin_accesses) {
             process->ratio = (1.0 * total_dram_accesses) / ideal_bin_accesses;
             total_ratio += process->ratio;
@@ -1439,12 +1441,12 @@ void *pebs_policy_thread()
           }
         } else {
           uint64_t total_bin_accesses = 0;
-          uint64_t ideal_bin_accesses = 0;
+          uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
           for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
             uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
             total_bin_accesses += (1 << i) * this_tier_pages;
           }
-
+/*
           for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
             uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
             ideal_bin_accesses += (1 << i) * this_tier_pages;
@@ -1453,6 +1455,7 @@ void *pebs_policy_thread()
               break;
             }
           }
+*/
           double proc_req_fast_share = ideal_bin_accesses * total_ratio;
           LOG("Process %d: target hit ratio: %.4f, ideal fast share: %ld, req fast share %.1f, curr fast share %.1f\n", 
             process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, proc_req_fast_share, process->ratio * ideal_bin_accesses);
