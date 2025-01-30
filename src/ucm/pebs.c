@@ -1206,6 +1206,8 @@ void *pebs_policy_thread()
   struct timeval start, end;
   double migrate_time;
 #ifndef TMTS
+  struct timeval decision_start, decision_end;
+  struct timeval migration_start, migration_end;
   struct hemem_process *tmp;
   uint64_t migrate_down_bytes;
   struct timeval now;
@@ -1286,6 +1288,7 @@ void *pebs_policy_thread()
       usleep((uint64_t)((1.0 * TMTS_SLEEP_DELTA) - migrate_time));
     }
 #else
+    gettimeofday(&decision_start, NULL);
     if (timed_cooling) {
       needs_cooling = false;
       // Check if we need to cool processes (Currently used by AutoFMMR)
@@ -1316,7 +1319,7 @@ void *pebs_policy_thread()
         }
         process->accessed_pages[DRAMREAD] = 0; process->accessed_pages[NVMREAD] = 0;
       } else {
-        process->current_miss_ratio = 0;
+        process->current_miss_ratio = process->target_miss_ratio;
       }
      
       for (int xxx = LAST_HEMEM_THREAD + 1; xxx < PEBS_NPROCS; xxx++) {
@@ -1377,11 +1380,11 @@ void *pebs_policy_thread()
             total_dram_accesses += (1 << i) * this_tier_pages;
           }
 
+          uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
+/*
           // compute ideal bins needed to achieve target
           // start from highest bins for both DRAM and NVM. The highest count pages should all be in
           // DRAM (eventually)
-          uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
-/*
           for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
             uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
             ideal_bin_accesses += (1 << i) * this_tier_pages;
@@ -1441,7 +1444,6 @@ void *pebs_policy_thread()
           }
         } else {
           uint64_t total_bin_accesses = 0;
-          uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
           for (int i = NUM_HOTNESS_LEVELS; i > 0; --i) {
             uint64_t this_tier_pages = process->dram_lists[i].numentries + process->nvm_lists[i].numentries;
             total_bin_accesses += (1 << i) * this_tier_pages;
@@ -1456,6 +1458,7 @@ void *pebs_policy_thread()
             }
           }
 */
+          uint64_t ideal_bin_accesses = (1 - process->target_miss_ratio) * total_bin_accesses;
           double proc_req_fast_share = ideal_bin_accesses * total_ratio;
           LOG("Process %d: target hit ratio: %.4f, ideal fast share: %ld, req fast share %.1f, curr fast share %.1f\n", 
             process->pid, (1 - process->target_miss_ratio), ideal_bin_accesses, proc_req_fast_share, process->ratio * ideal_bin_accesses);
@@ -1557,6 +1560,10 @@ void *pebs_policy_thread()
 
     //LOG("dram needed: %ld\tdram taking %ld\n", delta_need, delta_take);
     
+    gettimeofday(&decision_end, NULL);
+    LOG_TIME("policy_decision: %f s\n", elapsed(&decision_start, &decision_end));
+
+    gettimeofday(&migration_start, NULL);
     // make room on DRAM for by migrating down pages for each process
     process = peek_process(&processes_list);
     while (process != NULL) {
@@ -1647,6 +1654,8 @@ void *pebs_policy_thread()
       process = process->next;
       pthread_mutex_unlock(&(tmp->process_lock));
     }
+    gettimeofday(&migration_end, NULL);
+    LOG_TIME("migration_time: %f s\n", elapsed(&migration_start, &migration_end));
     gettimeofday(&end, NULL);
     migrate_time = PEBS_POLICY_INTERVAL * elapsed(&start, &end);
     if (migrate_time < (1.0 * PEBS_POLICY_INTERVAL)) {
@@ -1743,6 +1752,9 @@ void pebs_update_process(struct hemem_process *process, double new_miss_ratio)
   process_list_remove(&processes_list, process);
   pthread_mutex_lock(&(process->process_lock));
   process->target_miss_ratio = new_miss_ratio;
+//  if (process->target_miss_ratio == 1) {
+//    process->target_miss_ratio = 0.99999;
+//  }
   pthread_mutex_unlock(&(process->process_lock));
   enqueue_process(&processes_list, process);
 }
@@ -1825,7 +1837,8 @@ void pebs_init(void)
 
   for (int i = LAST_HEMEM_THREAD + 1; i < PEBS_NPROCS; i++) {
     perf_page[i][DRAMREAD] = perf_setup(0x1d3, 0, i, DRAMREAD);      // MEM_LOAD_L3_MISS_RETIRED.LOCAL_DRAM
-    perf_page[i][NVMREAD] = perf_setup(0x80d1, 0, i, NVMREAD);     // MEM_LOAD_RETIRED.LOCAL_PMM
+    perf_page[i][NVMREAD] = perf_setup(0x2d3, 0, i, NVMREAD);      // MEM_LOAD_L3_MISS_RETIRED.REMOTE_DRAM
+    //perf_page[i][NVMREAD] = perf_setup(0x80d1, 0, i, NVMREAD);     // MEM_LOAD_RETIRED.LOCAL_PMM
     //perf_page[i][WRITE] = perf_setup(0x82d0, 0, i, WRITE);    // MEM_INST_RETIRED.ALL_STORES
   }
 
