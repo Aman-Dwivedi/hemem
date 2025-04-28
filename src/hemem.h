@@ -181,6 +181,7 @@ struct hemem_page {
   uint64_t accesses[NPBUFTYPES];
   uint64_t tot_accesses[NPBUFTYPES];
   pthread_mutex_t page_lock;
+  struct timeval migrate_time;
 
   UT_hash_handle hh;
   struct hemem_page *next, *prev;

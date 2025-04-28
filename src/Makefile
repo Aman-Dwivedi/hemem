@@ -15,6 +15,12 @@ hemem-libs: libhemem-lru.so libhemem-simple.so libhemem-lru-swap.so libhemem.so 
 libhemem.so: hemem.o pebs.o timer.o interpose.o fifo.o spsc-ring.o
 	$(CC) $(LDFLAGS) -o libhemem.so hemem.o timer.o interpose.o pebs.o fifo.o spsc-ring.o $(HEMEM_LIBS)
 
+libhemem-sequential.so: hemem.o pebs-sequential.o timer.o interpose.o fifo.o spsc-ring.o
+	$(CC) $(LDFLAGS) -o libhemem-sequential.so hemem.o timer.o interpose.o pebs-sequential.o fifo.o spsc-ring.o $(HEMEM_LIBS)
+
+libhemem-stride.so: hemem.o pebs-stride.o timer.o interpose.o fifo.o spsc-ring.o
+	$(CC) $(LDFLAGS) -o libhemem-stride.so hemem.o timer.o interpose.o pebs-stride.o fifo.o spsc-ring.o $(HEMEM_LIBS)
+
 libhemem-llama.so: hemem-llama.o pebs.o timer.o interpose-llama.o fifo.o spsc-ring.o
 	$(CC) $(LDFLAGS) -o libhemem-llama.so hemem-llama.o timer.o interpose-llama.o pebs.o fifo.o spsc-ring.o  $(HEMEM_LIBS)
 
@@ -65,6 +71,12 @@ policies/paging.o: policies/paging.c policies/paging.h
 
 pebs.o: pebs.c pebs.h hemem.h fifo.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c pebs.c
+
+pebs-sequential.o: pebs-sequential.c pebs-sequential.h hemem.h fifo.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c pebs-sequential.c
+
+pebs-stride.o: pebs-stride.c pebs-stride.h hemem.h fifo.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c pebs-stride.c
 
 fifo.o: fifo.c fifo.h hemem.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c fifo.c

@@ -16,6 +16,12 @@ gups-random: gups-random.o
 gups-small: gups-small.o
 	$(CC) $(CFLAGS) $(INCLUDES) -o gups-small gups-small.o ../src/timer.o $(LIBS)
 
+gups-sequential: gups-sequential.o
+	$(CC) $(CFLAGS) $(INCLUDES) -o gups-sequential gups-sequential.o zipf.o $(LIBS) -L$(HEMEMDIR) -lhemem-sequential
+
+gups-stride-pages: gups-stride-pages.o
+	$(CC) $(CFLAGS) $(INCLUDES) -o gups-stride-pages gups-stride-pages.o zipf.o $(LIBS) -L$(HEMEMDIR) -lhemem-stride
+
 gups: gups.o
 	$(CC) $(CFLAGS) $(INCLUDES) -o gups gups.o zipf.o ../src/timer.o $(LIBS)
 
@@ -36,6 +42,12 @@ gups-lru-swap: gups.o
 
 gups-random.o: gups-random.c zipf.c gups.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c gups-random.c zipf.c
+
+gups-sequential.o: gups-sequential.c zipf.c gups.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c gups-sequential.c zipf.c
+
+gups-stride-pages.o: gups-stride-pages.c zipf.c gups.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c gups-stride-pages.c zipf.c
 
 gups.o: gups.c zipf.c  gups.h
 	$(CC) $(CFLAGS) $(INCLUDES) -c gups.c zipf.c
