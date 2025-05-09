@@ -617,12 +617,12 @@ void *pebs_policy_thread()
         continue;
       } 
     
-      for (int i = 0; i < 11; i++) {
+      for (int i = 0; i < 26; i++) {
         if (p != NULL) {
             for (tries = 0; tries < 2; tries++) {
               
               // If the prefetched page is already in DRAM then skip
-              if (p->in_dram) {
+              if (p->in_dram || p->ring_present || !p->present) {
                 break;
               }
 
@@ -703,8 +703,8 @@ void *pebs_policy_thread()
 
             p = get_hemem_page(p->va + PAGE_SIZE);
             if (p != NULL) {
-                if (!p->in_dram) {
-                  page_list_remove_page(p->list, p)
+                if (!p->in_dram && p->present && !p->ring_present) {
+                  page_list_remove_page(p->list, p);
                 }
             }
           } else {
