@@ -703,12 +703,10 @@ void *pebs_policy_thread()
 
             p = get_hemem_page(p->va + PAGE_SIZE);
             if (p != NULL) {
-                if (p->prev != NULL) {
-                    p->prev->next = p->next;
-                    p->prev = NULL;
+                if (!p->in_dram) {
+                  page_list_remove_page(p->list, p)
                 }
             }
-
           } else {
             break;
         }

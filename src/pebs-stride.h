@@ -11,7 +11,7 @@
 
 #define PEBS_KSWAPD_INTERVAL      (10000) // in us (10ms)
 #define PEBS_KSWAPD_MIGRATE_RATE  (10UL * 1024UL * 1024UL * 1024UL) // 10GB
-#define HOT_READ_THRESHOLD        (8)
+#define HOT_READ_THRESHOLD        (1)
 #define HOT_WRITE_THRESHOLD       (4)
 #define PEBS_COOLING_THRESHOLD    (24)
 
