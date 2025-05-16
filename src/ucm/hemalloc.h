@@ -22,8 +22,16 @@ struct PageInfo {
   size_t page_size;
   void *page_addr;
   struct PageInfo *next;
-  struct MemRegion head;
+  struct MemRegion *head;
 };
+
+/*
+
+|PageInfo|MemRegion head|....................|MemRegion|<data>..................
+                                             ^          ^^^^^^                 ^
+                                           curr         size page size
+
+*/
 
 // Allocates `size` bytes in a page marked with `tag`.
 void *hemalloc(size_t size, size_t tag);

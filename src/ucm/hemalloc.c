@@ -50,8 +50,11 @@ struct PageInfo *create_page(size_t size, size_t tag) {
   page_info->tag = tag;
   page_info->page_addr = page_addr;
   page_info->page_size = total_size;
-  page_info->head = create_node();
   page_info->next = NULL;
+  // Place the first MemRegion node directly after the PageInfo struct in memory
+  page_info->head =
+      (struct MemRegion *)((char *)page_info + sizeof(struct PageInfo));
+  *(page_info->head) = create_node();
 
   return page_info;
 }
@@ -64,10 +67,11 @@ struct MemRegion create_node() {
   return region;
 }
 
+// uh don't call this with page_info == NULL lol, bad things will happen. :^)
 void *allocate(struct PageInfo *page_info, size_t size) {
   // Find the smallest open slot that's larger than `size`
-  struct MemRegion *curr = &(page_info->head);
-  struct MemRegion *prev = &(page_info->head);
+  struct MemRegion *curr = page_info->head;
+  struct MemRegion *prev = page_info->head;
   while (true) {
     if (curr == NULL) { // This path means we've hit the end of the list
 
@@ -76,8 +80,11 @@ void *allocate(struct PageInfo *page_info, size_t size) {
       // In this case, we want to see if there is space left in this page
       // Remember that every allocation is prefixed with a `struct MemRegion`,
       // so add that to the size comparison
-      uintptr_t offset = (uintptr_t)curr % PAGE_SIZE;
-      if (page_info->page_size - offset >= size + sizeof(struct MemRegion)) {
+      uintptr_t offset =
+          ((uintptr_t)curr + sizeof(struct MemRegion) + curr->size) % PAGE_SIZE;
+
+      size_t remaining_space = page_info->page_size - offset;
+      if (remaining_space >= size + sizeof(struct MemRegion)) {
         // If there is space left, we need to create a new node and append it to
         // the Linked List We do this by writing to `prev + prev->size`
 
@@ -85,13 +92,18 @@ void *allocate(struct PageInfo *page_info, size_t size) {
         // implicitly converts `prev->size` to `prev->size * sizeof(struct
         // MemRegion)`, thus requiring the cast to `(char *)` to avoid this case
         struct MemRegion *new_node_addr =
-            (struct MemRegion *)((char *)prev + prev->size);
+            (struct MemRegion *)((char *)prev + sizeof(struct MemRegion) +
+                                 prev->size);
+
         *new_node_addr = create_node();
         prev->next = new_node_addr;
         curr = prev->next;
         break;
       } else {
         // No space left in this page, caller should call `create_page()` again.
+
+        // TODO: We have page_info data, should we do it ourselves? We just need
+        // to access page_info->next...
         return NULL;
       }
     } else if (curr->size > 0) {
@@ -103,7 +115,17 @@ void *allocate(struct PageInfo *page_info, size_t size) {
       // ALWAYS be a chunk of allocated memory. This simplified the logic here
       // and allows us to avoid checking the (curr->next == NULL) case.
 
-      size_t region_size = curr->next - curr + sizeof(struct MemRegion);
+      size_t region_size = curr->next - (curr + sizeof(struct MemRegion));
+      if (region_size < sizeof(struct MemRegion) + size) {
+        // No space in this slot!
+        goto next_iter;
+      } else {
+        // We have space to place stuff!
+        // Set the size and return the address the user can use to access the
+        // memory!
+        curr->size = size;
+        return curr + sizeof(struct MemRegion);
+      }
     }
   next_iter:
     // March pointers forward
