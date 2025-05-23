@@ -168,7 +168,13 @@ void *pebs_scan_thread()
                   //      make_hot_request(page);
                   //  }
                   //}
-                  /*else*/ if (page->accesses[DRAMREAD] + page->accesses[NVMREAD] >= HOT_READ_THRESHOLD) {
+                  /*else*/ 
+                  if (page->is_prefetched==true){
+                    gettimeofday(&cur_time, NULL);
+                    if (elapsed(&(page->migrate_time), &cur_time) > 1) {
+                        page->is_prefetched=false;
+                    }
+                  } else if (page->accesses[DRAMREAD] + page->accesses[NVMREAD] >= HOT_READ_THRESHOLD) {
                     if (!page->hot && !page->ring_present) {
                         make_hot_request(page);
                     }
@@ -607,67 +613,140 @@ void *pebs_policy_thread()
         enqueue_fifo(&nvm_cold_list, p); 
         continue;
       }
+      if (p->tag != 0) {
+        struct hemem_page *pages = get_pages_by_tag(p->tag);
+        while (pages != NULL) {
+          p = pages;
+          if (p->list != NULL) {
+            page_list_remove_page(p->list, p);
+          }
+          for (tries = 0; tries < 2; tries++) {
+            // find a free DRAM page
+            np = dequeue_fifo(&dram_free_list);
 
-      for (tries = 0; tries < 2; tries++) {
-        // find a free DRAM page
-        np = dequeue_fifo(&dram_free_list);
+            if (np != NULL) {
+              assert(!(np->present));
 
-        if (np != NULL) {
-          assert(!(np->present));
+              LOG("%lx: cold %lu -> hot %lu\t slowmem.hot: %lu, slowmem.cold: %lu\t fastmem.hot: %lu, fastmem.cold: %lu\n",
+                    p->va, p->devdax_offset, np->devdax_offset, nvm_hot_list.numentries, nvm_cold_list.numentries, dram_hot_list.numentries, dram_cold_list.numentries);
 
-          LOG("%lx: cold %lu -> hot %lu\t slowmem.hot: %lu, slowmem.cold: %lu\t fastmem.hot: %lu, fastmem.cold: %lu\n",
-                p->va, p->devdax_offset, np->devdax_offset, nvm_hot_list.numentries, nvm_cold_list.numentries, dram_hot_list.numentries, dram_cold_list.numentries);
+              old_offset = p->devdax_offset;
+              pebs_migrate_up(p, np->devdax_offset);
+              np->devdax_offset = old_offset;
+              np->in_dram = false;
+              np->present = false;
+              np->hot = false;
+              for (int i = 0; i < NPBUFTYPES; i++) {
+                np->accesses[i] = 0;
+                np->tot_accesses[i] = 0;
+              }
 
-          old_offset = p->devdax_offset;
-          pebs_migrate_up(p, np->devdax_offset);
-          np->devdax_offset = old_offset;
-          np->in_dram = false;
-          np->present = false;
-          np->hot = false;
-          for (int i = 0; i < NPBUFTYPES; i++) {
-            np->accesses[i] = 0;
-            np->tot_accesses[i] = 0;
+              enqueue_fifo(&dram_hot_list, p);
+              enqueue_fifo(&nvm_free_list, np);
+
+              migrated_bytes += pt_to_pagesize(p->pt);
+              break;
+            }
+
+            // no free dram page, try to find a cold dram page to move down
+            cp = dequeue_fifo(&dram_cold_list);
+            if (cp == NULL) {
+              // all dram pages are hot, so put it back in list we got it from
+              enqueue_fifo(&nvm_hot_list, p);
+              goto out;
+            }
+            assert(cp != NULL);
+
+            // find a free nvm page to move the cold dram page to
+            np = dequeue_fifo(&nvm_free_list);
+            if (np != NULL) {
+              assert(!(np->present));
+
+              LOG("%lx: hot %lu -> cold %lu\t slowmem.hot: %lu, slowmem.cold: %lu\t fastmem.hot: %lu, fastmem.cold: %lu\n",
+                    cp->va, cp->devdax_offset, np->devdax_offset, nvm_hot_list.numentries, nvm_cold_list.numentries, dram_hot_list.numentries, dram_cold_list.numentries);
+
+              old_offset = cp->devdax_offset;
+              pebs_migrate_down(cp, np->devdax_offset);
+              np->devdax_offset = old_offset;
+              np->in_dram = true;
+              np->present = false;
+              np->hot = false;
+              for (int i = 0; i < NPBUFTYPES; i++) {
+                np->accesses[i] = 0;
+                np->tot_accesses[i] = 0;
+              }
+
+              enqueue_fifo(&nvm_cold_list, cp);
+              enqueue_fifo(&dram_free_list, np);
+            }
+            assert(np != NULL);
+          }
+          pages->is_prefetched = true;
+          gettimeofday(&(p->migrate_time), NULL);
+          pages = pages->next_tag_list;
+        }
+      } else {
+        for (tries = 0; tries < 2; tries++) {
+          // find a free DRAM page
+          np = dequeue_fifo(&dram_free_list);
+
+          if (np != NULL) {
+            assert(!(np->present));
+
+            LOG("%lx: cold %lu -> hot %lu\t slowmem.hot: %lu, slowmem.cold: %lu\t fastmem.hot: %lu, fastmem.cold: %lu\n",
+                  p->va, p->devdax_offset, np->devdax_offset, nvm_hot_list.numentries, nvm_cold_list.numentries, dram_hot_list.numentries, dram_cold_list.numentries);
+
+            old_offset = p->devdax_offset;
+            pebs_migrate_up(p, np->devdax_offset);
+            np->devdax_offset = old_offset;
+            np->in_dram = false;
+            np->present = false;
+            np->hot = false;
+            for (int i = 0; i < NPBUFTYPES; i++) {
+              np->accesses[i] = 0;
+              np->tot_accesses[i] = 0;
+            }
+
+            enqueue_fifo(&dram_hot_list, p);
+            enqueue_fifo(&nvm_free_list, np);
+
+            migrated_bytes += pt_to_pagesize(p->pt);
+            break;
           }
 
-          enqueue_fifo(&dram_hot_list, p);
-          enqueue_fifo(&nvm_free_list, np);
-
-          migrated_bytes += pt_to_pagesize(p->pt);
-          break;
-        }
-
-        // no free dram page, try to find a cold dram page to move down
-        cp = dequeue_fifo(&dram_cold_list);
-        if (cp == NULL) {
-          // all dram pages are hot, so put it back in list we got it from
-          enqueue_fifo(&nvm_hot_list, p);
-          goto out;
-        }
-        assert(cp != NULL);
-
-        // find a free nvm page to move the cold dram page to
-        np = dequeue_fifo(&nvm_free_list);
-        if (np != NULL) {
-          assert(!(np->present));
-
-          LOG("%lx: hot %lu -> cold %lu\t slowmem.hot: %lu, slowmem.cold: %lu\t fastmem.hot: %lu, fastmem.cold: %lu\n",
-                cp->va, cp->devdax_offset, np->devdax_offset, nvm_hot_list.numentries, nvm_cold_list.numentries, dram_hot_list.numentries, dram_cold_list.numentries);
-
-          old_offset = cp->devdax_offset;
-          pebs_migrate_down(cp, np->devdax_offset);
-          np->devdax_offset = old_offset;
-          np->in_dram = true;
-          np->present = false;
-          np->hot = false;
-          for (int i = 0; i < NPBUFTYPES; i++) {
-            np->accesses[i] = 0;
-            np->tot_accesses[i] = 0;
+          // no free dram page, try to find a cold dram page to move down
+          cp = dequeue_fifo(&dram_cold_list);
+          if (cp == NULL) {
+            // all dram pages are hot, so put it back in list we got it from
+            enqueue_fifo(&nvm_hot_list, p);
+            goto out;
           }
+          assert(cp != NULL);
 
-          enqueue_fifo(&nvm_cold_list, cp);
-          enqueue_fifo(&dram_free_list, np);
+          // find a free nvm page to move the cold dram page to
+          np = dequeue_fifo(&nvm_free_list);
+          if (np != NULL) {
+            assert(!(np->present));
+
+            LOG("%lx: hot %lu -> cold %lu\t slowmem.hot: %lu, slowmem.cold: %lu\t fastmem.hot: %lu, fastmem.cold: %lu\n",
+                  cp->va, cp->devdax_offset, np->devdax_offset, nvm_hot_list.numentries, nvm_cold_list.numentries, dram_hot_list.numentries, dram_cold_list.numentries);
+
+            old_offset = cp->devdax_offset;
+            pebs_migrate_down(cp, np->devdax_offset);
+            np->devdax_offset = old_offset;
+            np->in_dram = true;
+            np->present = false;
+            np->hot = false;
+            for (int i = 0; i < NPBUFTYPES; i++) {
+              np->accesses[i] = 0;
+              np->tot_accesses[i] = 0;
+            }
+
+            enqueue_fifo(&nvm_cold_list, cp);
+            enqueue_fifo(&dram_free_list, np);
+          }
+          assert(np != NULL);
         }
-        assert(np != NULL);
       }
     }
 

@@ -182,6 +182,8 @@ struct hemem_page {
   bool present;
   bool written;
   bool hot;
+  bool is_prefetched;
+  struct timeval migrate_time;
   uint64_t naccesses;
   uint64_t migrations_up, migrations_down;
   uint64_t local_clock;
