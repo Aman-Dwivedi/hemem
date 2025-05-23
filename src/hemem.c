@@ -467,32 +467,6 @@ struct hemem_page* get_pages_by_tag(int tag) {
     return tag_entry->pages;
 }
 
-void remove_page_from_tag_dictionary(struct hemem_page *page) {
-    struct tag_list *tag_entry;
-    
-    // Find the tag entry
-    HASH_FIND_INT(tag_dictionary, &page->tag, tag_entry);
-    if (!tag_entry) return;  // Tag not found
-    
-    // Remove page from the linked list
-    if (page->prev) {
-        page->prev->next = page->next;
-    } else {
-        // This was the head of the list
-        tag_entry->pages = page->next;
-    }
-    
-    if (page->next) {
-        page->next->prev = page->prev;
-    }
-    
-    // If no more pages with this tag, remove the tag entry
-    if (tag_entry->pages == NULL) {
-        HASH_DEL(tag_dictionary, tag_entry);
-        free(tag_entry);
-    }
-}
-
 static void hemem_mmap_populate(void* addr, size_t length, int tag)
 {
   // Page mising fault case - probably the first touch case
