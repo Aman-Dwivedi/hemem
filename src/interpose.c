@@ -69,7 +69,7 @@ static int mmap_filter(void *addr, size_t length, int prot, int flags, int fd, o
 #endif
 
   LOG("hemem interpose: calling hemem mmap(0x%lx, %ld, %x, %x, %d, %ld)\n", (uint64_t)addr, length, prot, flags, fd, offset);
-  if ((*result = (uint64_t)hemem_mmap(addr, length, prot, flags, fd, offset)) == (uint64_t)MAP_FAILED) {
+  if ((*result = (uint64_t)hemem_mmap(addr, length, prot, flags, fd, offset, 0)) == (uint64_t)MAP_FAILED) {
     // hemem failed for some reason, try libc
     LOG("hemem mmap failed\n\tmmap(0x%lx, %ld, %x, %x, %d, %ld)\n", (uint64_t)addr, length, prot, flags, fd, offset);
   }

@@ -165,6 +165,14 @@ enum pagetypes {
   NPAGETYPES
 };
 
+struct tag_list {
+    int tag;                    // The tag value (key)
+    struct hemem_page *pages;   // Head of linked list of pages
+    UT_hash_handle hh;         // Required for uthash
+};
+
+struct tag_list *tag_dictionary ;
+
 struct hemem_page {
   uint64_t va;
   uint64_t devdax_offset;
@@ -181,9 +189,11 @@ struct hemem_page {
   uint64_t accesses[NPBUFTYPES];
   uint64_t tot_accesses[NPBUFTYPES];
   pthread_mutex_t page_lock;
+  int tag;
 
   UT_hash_handle hh;
   struct hemem_page *next, *prev;
+  struct hemem_page *next_tag_list;
   struct fifo_list *list;
 };
 
@@ -207,7 +217,7 @@ static inline enum pagetypes pagesize_to_pt(uint64_t pagesize)
 
 void hemem_init();
 void hemem_stop();
-void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset, int tag);
 int hemem_munmap(void* addr, size_t length);
 void *handle_fault();
 void hemem_migrate_up(struct hemem_page *page, uint64_t dram_offset);

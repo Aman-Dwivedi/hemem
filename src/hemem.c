@@ -417,7 +417,83 @@ static void hemem_parallel_memset(void* addr, int c, size_t n)
 }
 #endif
 
-static void hemem_mmap_populate(void* addr, size_t length)
+void add_page_to_tag_dictionary(struct hemem_page *page) {
+    struct tag_list *tag_entry;
+    
+    // Look up the tag in our dictionary
+    HASH_FIND_INT(tag_dictionary, &page->tag, tag_entry);
+    
+    // If tag doesn't exist, create new entry
+    if (tag_entry == NULL) {
+        tag_entry = (struct tag_list*)malloc(sizeof(struct tag_list)); // Would malloc work here?
+        tag_entry->tag = page->tag;
+        tag_entry->pages = page;
+        HASH_ADD_INT(tag_dictionary, tag_entry->tag, tag_entry);
+    } else {
+        page->next_tag_list = tag_entry->pages;
+        tag_entry->pages = page;
+    }
+}
+
+void remove_page_from_tag_dictionary(struct hemem_page *page) {
+    struct tag_list *tag_entry;
+    
+    // Find the tag entry
+    HASH_FIND_INT(tag_dictionary, &page->tag, tag_entry);
+    assert(tag_entry != NULL && "Tag not found");
+    
+    // Remove page from the linked list
+    if (tag_entry->pages == page) {
+        tag_entry->pages = page->next_tag_list;
+    } else {
+        struct hemem_page *cur = tag_entry->pages;
+        while (cur->next_tag_list != page) {
+            cur = cur->next_tag_list;
+        }
+        cur->next_tag_list = page->next_tag_list;
+    }
+    
+    // If no more pages with this tag, remove the tag entry
+    if (tag_entry->pages == NULL) {
+        HASH_DEL(tag_dictionary, tag_entry);
+        free(tag_entry);
+    }
+}
+
+struct hemem_page* get_pages_by_tag(int tag) {
+    struct tag_list *tag_entry;
+    HASH_FIND_INT(tag_dictionary, &tag, tag_entry);
+    assert(tag_entry != NULL && "Tag not found");
+    return tag_entry->pages;
+}
+
+void remove_page_from_tag_dictionary(struct hemem_page *page) {
+    struct tag_list *tag_entry;
+    
+    // Find the tag entry
+    HASH_FIND_INT(tag_dictionary, &page->tag, tag_entry);
+    if (!tag_entry) return;  // Tag not found
+    
+    // Remove page from the linked list
+    if (page->prev) {
+        page->prev->next = page->next;
+    } else {
+        // This was the head of the list
+        tag_entry->pages = page->next;
+    }
+    
+    if (page->next) {
+        page->next->prev = page->prev;
+    }
+    
+    // If no more pages with this tag, remove the tag entry
+    if (tag_entry->pages == NULL) {
+        HASH_DEL(tag_dictionary, tag_entry);
+        free(tag_entry);
+    }
+}
+
+static void hemem_mmap_populate(void* addr, size_t length, int tag)
 {
   // Page mising fault case - probably the first touch case
   // allocate in DRAM via LRU
@@ -480,6 +556,7 @@ static void hemem_mmap_populate(void* addr, size_t length)
     assert(page->va % HUGEPAGE_SIZE == 0);
     page->migrating = false;
     page->migrations_up = page->migrations_down = 0;
+    page->tag = tag;
     //page->pa = hemem_va_to_pa(page);
  
     pthread_mutex_init(&(page->page_lock), NULL);
@@ -489,6 +566,11 @@ static void hemem_mmap_populate(void* addr, size_t length)
 
     // place in hemem's page tracking list
     add_page(page);
+
+    if (tag != 0) {
+      add_page_to_tag_dictionary(page);
+    }
+
     page_boundry += pagesize;
   }
 
@@ -496,7 +578,7 @@ static void hemem_mmap_populate(void* addr, size_t length)
 
 #define PAGE_ROUND_UP(x) (((x) + (HUGEPAGE_SIZE)-1) & (~((HUGEPAGE_SIZE)-1)))
 
-void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
+void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset, int tag)
 {
   void *p;
   struct uffdio_cr3 uffdio_cr3;
@@ -552,7 +634,7 @@ void* hemem_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t o
 
    
 //  if ((flags & MAP_POPULATE) == MAP_POPULATE) {
-    hemem_mmap_populate(p, length);
+    hemem_mmap_populate(p, length, tag);
 //  }
 
   mem_mmaped = length;
