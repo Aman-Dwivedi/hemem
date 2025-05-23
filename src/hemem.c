@@ -425,10 +425,12 @@ void add_page_to_tag_dictionary(struct hemem_page *page) {
     
     // If tag doesn't exist, create new entry
     if (tag_entry == NULL) {
+        internal_call = true;
         tag_entry = (struct tag_list*)malloc(sizeof(struct tag_list)); // Would malloc work here?
         tag_entry->tag = page->tag;
         tag_entry->pages = page;
         HASH_ADD_INT(tag_dictionary, tag_entry->tag, tag_entry);
+        internal_call = false;
     } else {
         page->next_tag_list = tag_entry->pages;
         tag_entry->pages = page;
