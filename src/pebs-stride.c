@@ -617,12 +617,12 @@ void *pebs_policy_thread()
         continue;
       } 
     
-      for (int i = 0; i < 26; i++) {
+      for (int i = 0; i < 51; i++) {
         if (p != NULL) {
             for (tries = 0; tries < 2; tries++) {
               
               // If the prefetched page is already in DRAM then skip
-              if (p->in_dram || p->ring_present || !p->present) {
+              if (p->in_dram || !p->present) {
                 break;
               }
 
@@ -702,8 +702,8 @@ void *pebs_policy_thread()
             }
 
             p = get_hemem_page(p->va + PAGE_SIZE);
-            if (p != NULL) {
-                if (!p->in_dram && p->present && !p->ring_present) {
+            if (p != NULL and i != 50) {
+                if (!p->in_dram && p->present) {
                   page_list_remove_page(p->list, p);
                 }
             }
@@ -891,8 +891,8 @@ void pebs_init(void)
   r = pthread_create(&kswapd_thread, NULL, pebs_policy_thread, NULL);
   assert(r == 0);
   
-  LOG("Memory management policy is PEBS\n");
-
+  LOG("Memory management policy is PEBS-Strided\n");
+  printf("Memory management policy is PEBS-Strided\n");
   LOG("pebs_init: finished\n");
 
 }
