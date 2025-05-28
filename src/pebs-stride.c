@@ -702,7 +702,7 @@ void *pebs_policy_thread()
             }
 
             p = get_hemem_page(p->va + PAGE_SIZE);
-            if (p != NULL and i != 50) {
+            if (p != NULL && i != 50) {
                 if (!p->in_dram && p->present) {
                   page_list_remove_page(p->list, p);
                 }
