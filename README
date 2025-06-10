@@ -96,3 +96,8 @@ The GapBS application can be found in the `apps/gapbs` directory. To run the BC 
 
 which will run the bc algorithm with HeMem on a graph with 2^scale vertices.
 
+## Pattern Based Prefetching Policy
+
+On top of the baseline HeMem implementation described above, we have implemented a pattern based prefetching policy for two common access patterns, namely, strided and sequential access patterns. The link to the presentation slides for this enhancement of HeMem, which includes some initial results, can be found [here](https://docs.google.com/presentation/d/1dNuy4DDfiv3_tPxroBoI6gBxo_nE7cyD7TWDBZ5RlDs/edit?usp=sharing).
+
+In order to achieve this, we needed to make changes to the pebs.c file. In order to preserve the baseline HeMem and create separate versions for sequential and strided access patterns two separate c files along with their header files called pebs-strided and pebs-sequential have been created. The majority of the modifications have been made in the pebs_policy_thread within the pebs file. This thread is responsible for migrating pages from NVM to DRAM, hence we have added the functionality of migrating the next 10 pages along with the requested page. As described in the paper and the slides sequential access pattern and striding within a page did not result in any improvements but striding across pages did improve efficiency. To achieve this a new gups benchmark was created called gups-sequential.c which stride across an array such that the next element being accessed is the next adjacent virtual address. This improves memory latency by ensuring data is available before demand.
