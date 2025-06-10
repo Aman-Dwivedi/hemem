@@ -175,10 +175,14 @@ void *pebs_scan_thread()
                     if (elapsed(&(page->migrate_time), &cur_time) > 1) {
                         page->is_prefetched=false;
                     }
+		    //printf("Scan thread: Prefetched page %d\n", page->is_prefetched);
                   } else if (page->accesses[DRAMREAD] + page->accesses[NVMREAD] >= HOT_READ_THRESHOLD) {
                     if (!page->hot && !page->ring_present) {
+			//printf("Scan thread: Hot page making hot request\n");
                         make_hot_request(page);
-                    }
+                    } else {
+			//printf("Scan thread: Hot page %ld NOT making hot request hot: %d, ring: %d, dram: %d\n", page->va, page->hot, page->ring_present, page->in_dram);
+		    }
                   } else if (/*(page->accesses[WRITE] < HOT_WRITE_THRESHOLD) &&*/ (page->accesses[DRAMREAD] + page->accesses[NVMREAD] < HOT_READ_THRESHOLD)) {
                     if (page->hot && !page->ring_present) {
                         make_cold_request(page);
@@ -350,6 +354,9 @@ struct hemem_page* partial_cool(struct fifo_list *hot, struct fifo_list *cold, b
   struct hemem_page *p;
   uint64_t tmp_accesses[NPBUFTYPES];
 
+  //if (current != NULL && current->is_prefetched) {
+  //    return current;
+  //}
   if (dram && !need_cool_dram) {
       return current;
   }
@@ -364,7 +371,7 @@ struct hemem_page* partial_cool(struct fifo_list *hot, struct fifo_list *cold, b
   if (start_nvm_page == NULL && !dram) {
       start_nvm_page = hot->last;
   }
-
+  //printf("Starting loop\n");
   for (int i = 0; i < COOLING_PAGES; i++) {
     next_page(hot, current, &p);
     if (p == NULL) {
@@ -403,7 +410,7 @@ struct hemem_page* partial_cool(struct fifo_list *hot, struct fifo_list *cold, b
     else {
         current = p;
     }
-  }
+  }//printf("Ending loop\n");
 
   return current;
 }
@@ -518,6 +525,7 @@ void *pebs_policy_thread()
   for (;;) {
     gettimeofday(&start, NULL);
     // free pages using free page ring buffer
+    //printf("free ring %d\n", ring_buf_empty(free_page_ring));
     while(!ring_buf_empty(free_page_ring)) {
         struct fifo_list *list;
         page = (struct hemem_page*)ring_buf_get(free_page_ring);
@@ -538,7 +546,7 @@ void *pebs_policy_thread()
             enqueue_fifo(&nvm_free_list, page);
         }
     }
-
+    //printf("hot ring %d\n", ring_buf_empty(hot_ring));
     num_ring_reqs = 0;
     // handle hot requests from hot buffer by moving pages to hot list
     while(!ring_buf_empty(hot_ring) && num_ring_reqs < HOT_RING_REQS_THRESHOLD) {
@@ -563,11 +571,12 @@ void *pebs_policy_thread()
         page->ring_present = false;
         num_ring_reqs++;
         make_hot(page);
-        //printf("hot ring, hot pages:%llu\n", num_ring_reqs);
+        //printf("hot ring, hot pages:%llu, %d\n", num_ring_reqs, ring_buf_empty(hot_ring));
 	  }
 
     num_ring_reqs = 0;
     // handle cold requests from cold buffer by moving pages to cold list
+    //printf("cold ring %d\n", ring_buf_empty(cold_ring));
     while(!ring_buf_empty(cold_ring) && num_ring_reqs < COLD_RING_REQS_THRESHOLD) {
         page = (struct hemem_page*)ring_buf_get(cold_ring);
         if (page == NULL) {
@@ -595,11 +604,13 @@ void *pebs_policy_thread()
     }
     
     // move each hot NVM page to DRAM
+    //printf("Start migration\n");
     for (migrated_bytes = 0; migrated_bytes < PEBS_KSWAPD_MIGRATE_RATE;) {
       
       p = dequeue_fifo(&nvm_hot_list);
 
       if (p == NULL) {
+	//printf("Nothing in NVM\n");
         // nothing in NVM is currently hot -- bail out
         break;
       }  
@@ -614,15 +625,16 @@ void *pebs_policy_thread()
         // it has been cooled, need to move it into the cold list
         p->hot = false;
         enqueue_fifo(&nvm_cold_list, p); 
+	//printf("Page has become cold %d\n", p->is_prefetched);
         continue;
       } 
-    
-      for (int i = 0; i < 51; i++) {
+      //printf("Migrating page\n");
+      for (int i = 0; i < 11; i++) {
         if (p != NULL) {
             for (tries = 0; tries < 2; tries++) {
               
               // If the prefetched page is already in DRAM then skip
-              if (p->in_dram || !p->present) {
+              if (i > 0 && (p->in_dram || !p->present || p->ring_present)) {
                 break;
               }
 
@@ -646,11 +658,12 @@ void *pebs_policy_thread()
                     p->is_prefetched = true;
                     p->hot = true;
                     gettimeofday(&(p->migrate_time), NULL);
+		    //printf("Prefetching Page %d %ld\n", i, p->va);
                 }
 
-                for (int i = 0; i < NPBUFTYPES; i++) {
-                  np->accesses[i] = 0;
-                  np->tot_accesses[i] = 0;
+                for (int j = 0; j < NPBUFTYPES; j++) {
+                  np->accesses[j] = 0;
+                  np->tot_accesses[j] = 0;
                 }
       
                 enqueue_fifo(&dram_hot_list, p);
@@ -668,6 +681,7 @@ void *pebs_policy_thread()
                     p->is_prefetched = true;
                     p->hot = true;
                     gettimeofday(&(p->migrate_time), NULL);
+		    //printf("Moving to NVM Hot Prefetching Page %d %ld\n", i, p->va);
                 }
 
                 // all dram pages are hot, so put it back in list we got it from
@@ -690,9 +704,9 @@ void *pebs_policy_thread()
                 np->in_dram = true;
                 np->present = false;
                 np->hot = false;
-                for (int i = 0; i < NPBUFTYPES; i++) {
-                  np->accesses[i] = 0;
-                  np->tot_accesses[i] = 0;
+                for (int j = 0; j < NPBUFTYPES; j++) {
+                  np->accesses[j] = 0;
+                  np->tot_accesses[j] = 0;
                 }
       
                 enqueue_fifo(&nvm_cold_list, cp);
@@ -702,8 +716,11 @@ void *pebs_policy_thread()
             }
 
             p = get_hemem_page(p->va + PAGE_SIZE);
-            if (p != NULL && i != 50) {
-                if (!p->in_dram && p->present) {
+            if (p != NULL && i != 10) {
+                if (!p->in_dram && p->present  && !p->ring_present) {
+                  if (p == cur_cool_in_nvm) {
+		    next_page(p->list, p, &cur_cool_in_nvm);
+		  }
                   page_list_remove_page(p->list, p);
                 }
             }
@@ -714,10 +731,12 @@ void *pebs_policy_thread()
       } 
     }
     
-
+    //printf("Cooling\n");
     #ifdef COOL_IN_PLACE
     cur_cool_in_dram = partial_cool(&dram_hot_list, &dram_cold_list, true, cur_cool_in_dram);
+    //printf("DRAM Done\n");
     cur_cool_in_nvm = partial_cool(&nvm_hot_list, &nvm_cold_list, false, cur_cool_in_nvm);
+    //printf("NVM Done\n");
     #else
     partial_cool(&dram_hot_list, &dram_cold_list, true);
     partial_cool(&nvm_hot_list, &nvm_cold_list, false);
@@ -728,6 +747,8 @@ out:
     // elapsed time in us
     migrate_time = elapsed(&start, &end) * 1000000.0;
     if (migrate_time < (1.0 * PEBS_KSWAPD_INTERVAL)) {
+      //fprintf(stdout, "SLEEPING for %f, %f\n", migrate_time, (1.0 * PEBS_KSWAPD_INTERVAL) - migrate_time);
+      //assert(false);
       usleep((uint64_t)((1.0 * PEBS_KSWAPD_INTERVAL) - migrate_time));
     }
  
