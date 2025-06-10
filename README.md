@@ -96,3 +96,6 @@ The GapBS application can be found in the `apps/gapbs` directory. To run the BC 
 
 which will run the bc algorithm with HeMem on a graph with 2^scale vertices.
 
+## HeMem Changes for custom Allocator
+
+This branch is created off the hemalloc-api branch, which is responsible for creating a custom memory allocator allowing user to provide a tag along with their malloc calls in order to aid HeMem in identifying user data structures. Once a page has been identified to have a part or all of the data structure then accessing any page with a particular tag will trigger all the other pages with the same tag to move to DRAM if not already present there. This branch makes the necessary changes in HeMem to support these migrations. The changes to the page_struct and pebs_scan_thread are quite similar to the changes made in the prefetching branch. The cooling mechanism works similarly for both the approaches as we do not want to migrate the prefetched pages immediately back to NVM. The changes in the policy_thread are different as it needed to be aware of the page tags and then migrate all the pages with a particular tag into DRAM if any one of those pages was triggered for migration. Unfortunately, this backend could not be tested and will need some fixes as part of future work.
