@@ -58,8 +58,8 @@ extern uint64_t stats_thread_cpu;
 
 extern FILE* miss_ratio_f;
 
-#define NVMSIZE_DEFAULT   (480L * (1024L * 1024L * 1024L))
-#define DRAMSIZE_DEFAULT  (128L * (1024L * 1024L * 1024L))
+#define NVMSIZE_DEFAULT   (23L * (1024L * 1024L * 1024L))
+#define DRAMSIZE_DEFAULT  (11L * (1024L * 1024L * 1024L))
 
 #define NVMOFFSET_DEFAULT (0)
 #define DRAMOFFSET_DEFAULT (0)
